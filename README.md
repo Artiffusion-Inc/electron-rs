@@ -6,6 +6,12 @@ Build and control an Electron distribution from Rust, without Tauri.
 - Stage a private distribution with bundled `main.cjs` and `preload.cjs`
 - Drive it with typed JSON-RPC, events, Node commands, and main-thread scripts
 
+## Browser guests
+
+Set the trusted webview creation config’s `browserHost` to `true`, then call `rpc::browser::Acquire { webview_id, workspace }` and `Release { webview_id, lease }`. Reservations contain `lease` and a process-local, nonpersistent `partition`. Attach one `<webview partition="..." src="about:blank#LEASE" allowpopups>` per reservation; approved popup URLs arrive as `browser.openRequested { webviewId, lease, url }`. Browser guests have no preload or runtime IPC identity, deny permissions/downloads/native popups, and block application-host and privileged-scheme requests. Owners must be top-level `WebContentsView` pages: Electron does not register recursive `<webview>` elements in adopted guests, even with `webviewTag` enabled.
+
+Run `pnpm run build && pnpm run test:browser` for the isolated real-Electron regression (Linux requires a graphical session/Xvfb and the normal Electron sandbox setup).
+
 ## Install
 
 Git-only; pin a revision or tag for release builds.

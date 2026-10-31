@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import { BrowserGuests } from './browser'
 import os from 'node:os'
 import path from 'node:path'
 import { app, BaseWindow, nativeImage, session, WebContentsView } from 'electron'
@@ -13,6 +14,8 @@ export interface WindowFactory {
   createWindow(params: Record<string, any>): { windowId: number }
   createWebview(params: Record<string, any>): { webviewId: number }
   closeWebview(webviewId: number): void
+  acquireBrowserGuest(webviewId: number, workspace: unknown): { lease: string; partition: string }
+  releaseBrowserGuest(webviewId: number, lease: unknown): Promise<void>
 }
 
 export interface FactoryDependencies {
@@ -34,7 +37,17 @@ export class Factory implements WindowFactory {
   private readonly guestAttachments = new Map<string, { host: Webview; init: WebviewInit; preload: string }>()
   private readonly guestAttachmentIds = new Map<Webview, Map<number, { host: Webview; init: WebviewInit; preload: string }>>()
 
-  constructor(private readonly deps: FactoryDependencies) {}
+  private readonly browser: BrowserGuests
+
+  constructor(private readonly deps: FactoryDependencies) { this.browser = new BrowserGuests(deps.transport) }
+
+  acquireBrowserGuest(webviewId: number, workspace: unknown): { lease: string; partition: string } {
+    return this.browser.acquire(this.deps.webviews.get(webviewId), workspace)
+  }
+
+  releaseBrowserGuest(webviewId: number, lease: unknown): Promise<void> {
+    return this.browser.release(this.deps.webviews.get(webviewId), lease)
+  }
 
   createWindow(params: Params): { windowId: number } {
     const { windowId } = params
@@ -200,7 +213,7 @@ export class Factory implements WindowFactory {
 
   private webPreferences(webview: Params, config: WindowConfig, target = this.sessionFor(webview)): BrowserWindowConstructorOptions['webPreferences'] {
     return {
-      contextIsolation: true, sandbox: true, nodeIntegration: false, webviewTag: config.webviewTag ?? true,
+      contextIsolation: true, sandbox: true, nodeIntegration: false, webviewTag: webview.browserHost === true || (config.webviewTag ?? true),
       nodeIntegrationInSubFrames: true, session: target,
       preload: this.writeInitPreload(webview.webviewId, webview.initScripts),
       javascript: config.javascriptDisabled !== true, devTools: config.devtools !== false,
@@ -239,6 +252,7 @@ export class Factory implements WindowFactory {
     webview.on('navigationCommitted', (url) => this.deps.transport.send('webview.navigationCommitted', { webviewId: id, url }))
     webview.on('loadStarted', (url) => this.deps.transport.send('webview.loadStarted', { webviewId: id, url }))
     webview.on('loadFinished', (url) => this.deps.transport.send('webview.loadFinished', { webviewId: id, url }))
+    webview.on('loadFailed', (url) => this.deps.transport.send('webview.loadFailed', { webviewId: id, url }))
     webview.on('titleChanged', (title) => this.deps.transport.send('webview.titleChanged', { webviewId: id, title }))
     webview.on('processGone', (details) => this.deps.transport.send('webview.processGone', { webviewId: id, ...details }))
     webview.on('closed', () => {
@@ -248,6 +262,7 @@ export class Factory implements WindowFactory {
       this.deps.webviews.delete(id)
       this.deps.transport.send('webview.closed', { webviewId: id })
     })
+    if (webview.browserHost) { this.browser.bind(webview); return }
     if (webview.adopted) return
     const contents = webview.contents
     contents.on('will-attach-webview', (event, preferences, params) => {
@@ -258,7 +273,7 @@ export class Factory implements WindowFactory {
       const initial = new URL(webview.initialUrl)
       if (!current.host || current.protocol !== initial.protocol || current.host !== initial.host) { event.preventDefault(); return }
       preferences.preload = plan.preload
-      preferences.webviewTag = false
+      preferences.webviewTag = plan.init.browserHost === true
       preferences.nodeIntegrationInSubFrames = false
       const instanceId = params?.instanceId
       const ids = this.guestAttachmentIds.get(webview) ?? new Map()

@@ -72,6 +72,23 @@ jobs:
       - name: Test Node regressions
         run: pnpm run test:checks
 
+      - name: Install browser fixture Electron
+        run: node node_modules/electron/install.js
+
+      - name: Configure the browser fixture Chromium sandbox
+        if: runner.os == 'Linux'
+        run: |
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+
+      - name: Test real browser guests
+        if: runner.os != 'Linux'
+        run: pnpm run test:browser
+
+      - name: Test real browser guests under a virtual display
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum --server-args='-screen 0 1280x1024x24' pnpm run test:browser
+
       - name: Test Rust regressions
         run: cargo test --locked
 

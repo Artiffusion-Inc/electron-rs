@@ -642,6 +642,16 @@ pub mod webview {
   }
 }
 
+pub mod browser {
+  use super::*;
+  #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+  pub struct Reservation { pub lease: String, pub partition: String }
+  requests! {
+    Acquire { webview_id: u32, workspace: String } => Reservation, "browser.acquire", deferred = true;
+    Release { webview_id: u32, lease: String } => (), "browser.release", deferred = true;
+  }
+}
+
 /// Custom protocol registration and replies to `protocol.request` events.
 pub mod protocol {
   use super::*;
@@ -714,6 +724,7 @@ mod tests {
     let methods: Vec<_> = window::METHODS
       .iter()
       .chain(webview::METHODS)
+      .chain(browser::METHODS)
       .chain(protocol::METHODS)
       .chain(app::METHODS)
       .copied()
@@ -1002,6 +1013,7 @@ mod tests {
     for &(method, deferred) in window::SCHEDULING
       .iter()
       .chain(webview::SCHEDULING)
+      .chain(browser::SCHEDULING)
       .chain(protocol::SCHEDULING)
       .chain(app::SCHEDULING)
     {

@@ -11,7 +11,7 @@ export interface CookieFilter { url?: string }
 export interface CookieInit { url: string; name: string; value: string; domain?: string; path?: string; secure?: boolean; httpOnly?: boolean; sameSite?: 'unspecified' | 'no_restriction' | 'lax' | 'strict'; expirationDate?: number }
 export interface WebviewEvents {
   navigationCommitted: [url: string]; loadStarted: [url: string]; loadFinished: [url: string]
-  titleChanged: [title: string]; processGone: [details: { reason: string; exitCode: number }]; closed: []; reparented: [previous: Window]
+  loadFailed: [url: string]; titleChanged: [title: string]; processGone: [details: { reason: string; exitCode: number }]; closed: []; reparented: [previous: Window]
 }
 
 type NativeView = WebContentsView & { getVisible?(): boolean; setVisible?(visible: boolean): void }
@@ -74,9 +74,11 @@ export class Webview extends EventEmitter<WebviewEvents> {
   setMain(main: boolean): void { this.main = main }
   get webviewPolicy(): WebviewPolicy | undefined { return this.policy }
   get initialUrl(): string { return this.config.url }
+  get browserHost(): boolean { return this.config.browserHost === true }
   acceptsIpc(url: string): boolean {
-    if (typeof this.config.ipcOrigin !== 'string') return true
-    try { return new URL(url).origin !== 'null' && new URL(url).origin === this.config.ipcOrigin } catch { return false }
+    const origin = this.browserHost ? new URL(this.initialUrl).origin : this.config.ipcOrigin
+    if (typeof origin !== 'string') return true
+    try { return new URL(url).origin !== 'null' && new URL(url).origin === origin } catch { return false }
   }
   private bindEvents(): void {
     const c = this.contents
@@ -85,8 +87,9 @@ export class Webview extends EventEmitter<WebviewEvents> {
     c.on('did-navigate', (_e, url) => this.emit('navigationCommitted', url))
     c.on('did-navigate-in-page', (_e, url, isMain) => { if (isMain) this.emit('navigationCommitted', url) })
     c.on('dom-ready', () => { if (this.attached) this.syncOwnerState() })
-    c.on('did-start-loading', () => this.emit('loadStarted', c.getURL()))
+    c.on('did-start-navigation', (_event, url, inPlace, mainFrame) => { if (mainFrame && !inPlace) this.emit('loadStarted', url) })
     c.on('did-finish-load', () => this.emit('loadFinished', c.getURL()))
+    c.on('did-fail-load', (_event, code, _description, url, mainFrame) => { if (mainFrame && code !== -3) this.emit('loadFailed', url) })
     c.on('page-title-updated', (_e, title) => this.emit('titleChanged', title))
     c.on('render-process-gone', (_e, details) => this.emit('processGone', { reason: details.reason, exitCode: details.exitCode }))
     c.once('destroyed', () => {
