@@ -631,6 +631,7 @@ pub mod webview {
     SetBackgroundColor { webview_id: u32, color: Option<String> } => (), "webview.backgroundColor", deferred = true;
     Focus { webview_id: u32 } => (), "webview.focus", deferred = true;
     Print { webview_id: u32 } => (), "webview.print", deferred = true;
+    Capture { webview_id: u32 } => String, "webview.capture", deferred = true;
     Close { webview_id: u32 } => (), "webview.close", deferred = true;
     Cookies {
       webview_id: u32,

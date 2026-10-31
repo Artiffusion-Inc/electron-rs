@@ -75,6 +75,12 @@ jobs:
       - name: Install browser fixture Electron
         run: node node_modules/electron/install.js
 
+      - name: Build the browser fixture AppKit bridge
+        if: runner.os == 'macOS'
+        run: |
+          clang++ -std=c++17 -fobjc-arc -bundle -undefined dynamic_lookup -framework AppKit -arch "$(uname -m)" -mmacosx-version-min=12.0 native/appkit.mm -o assets/appkit.node
+          codesign --force --sign - assets/appkit.node
+
       - name: Configure the browser fixture Chromium sandbox
         if: runner.os == 'Linux'
         run: |

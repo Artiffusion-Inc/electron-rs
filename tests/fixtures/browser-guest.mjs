@@ -39,7 +39,7 @@ async function run() {
         await once(server, 'listening')
         return 'http://127.0.0.1:' + server.address().port
       }
-      const hostUrl = await serve('<!doctype html><body>host</body>')
+      const hostUrl = await serve('<!doctype html><style>html{background:rgb(17,85,153)}</style><body>host<script>window.captureNonce=crypto.randomUUID();window.captureLoads=Number(sessionStorage.captureLoads||0)+1;sessionStorage.captureLoads=window.captureLoads</script></body>')
       const externalUrl = await serve('<!doctype html><title>external browser</title><body>external</body>')
       const factory = new Factory({ windows, webviews, environment: new Environment(webviews),
         policies: { attach() {} }, protocols: { prepare() {} }, popups: new Map(),
@@ -61,6 +61,23 @@ async function run() {
       await once(host.contents, 'did-finish-load')
       assert.equal(host.adopted, false)
       assert.equal(host.contents.getLastWebPreferences().webviewTag, true)
+      const commands = require('../../assets/runtime/commands.cjs').createCommands({ webviews })
+      const captureState = '({nonce:window.captureNonce,url:location.href,loads:window.captureLoads})'
+      windows.get(1).native.show()
+      await host.contents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+      const beforeCapture = await host.contents.executeJavaScript(captureState)
+      const image = require('electron').nativeImage.createFromDataURL(await commands['webview.capture']({ webviewId: 3 }))
+      assert.equal(image.isEmpty(), false)
+      assert.deepEqual([...image.toBitmap().subarray(0, 3)], [153, 85, 17], 'capture must contain the native host background, not a blank placeholder')
+      assert.deepEqual(await host.contents.executeJavaScript(captureState), beforeCapture, 'capture must preserve the live document, URL and reload count')
+      assert.throws(() => commands['webview.capture']({ webviewId: 999 }), /unknown webview/);
+      const capturePage = host.contents.capturePage
+      try {
+        host.contents.capturePage = async () => require('electron').nativeImage.createEmpty()
+        await assert.rejects(commands['webview.capture']({ webviewId: 3 }), /empty image/)
+        host.contents.capturePage = async () => { throw new Error('capture failed') }
+        await assert.rejects(commands['webview.capture']({ webviewId: 3 }), /capture failed/)
+      } finally { host.contents.capturePage = capturePage }
       assert.throws(() => factory.acquireBrowserGuest(2, 'workspace'), /untrusted owner/)
       for (const invalid of ['', null, 'x'.repeat(4097)]) assert.throws(() => factory.acquireBrowserGuest(3, invalid), /invalid workspace/)
       const reservation = factory.acquireBrowserGuest(3, 'workspace')

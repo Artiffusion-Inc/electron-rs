@@ -149,6 +149,11 @@ export class Webview extends EventEmitter<WebviewEvents> {
   canGoBack(): boolean { return Boolean((this.contents as NativeContents).navigationHistory?.canGoBack()) }
   goForward(): void { const h = (this.contents as NativeContents).navigationHistory; if (h?.canGoForward()) h.goForward() }
   canGoForward(): boolean { return Boolean((this.contents as NativeContents).navigationHistory?.canGoForward()) }
+  async capture(): Promise<string> {
+    const image = await this.contents.capturePage()
+    if (image.isEmpty()) throw new Error('webview capture returned an empty image')
+    return image.toDataURL()
+  }
   evaluate(script: string): Promise<unknown> { return this.contents.executeJavaScript(script, true) }
   snapshot(): WebviewSnapshot {
     const scaleFactor = this.owner.scale, contentBounds = this.owner.native.getContentBounds()
