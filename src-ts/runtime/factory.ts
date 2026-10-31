@@ -32,6 +32,7 @@ export class Factory implements WindowFactory {
   private readonly customSessions = new Set<Session>()
   private readonly guestPlans = new Map<number, { host: Webview; init: WebviewInit; preload: string }>()
   private readonly guestAttachments = new Map<string, { host: Webview; init: WebviewInit; preload: string }>()
+  private readonly guestAttachmentIds = new Map<Webview, Map<number, { host: Webview; init: WebviewInit; preload: string }>>()
 
   constructor(private readonly deps: FactoryDependencies) {}
 
@@ -127,7 +128,16 @@ export class Factory implements WindowFactory {
   closeWebview(webviewId: number): void {
     let pending = this.guestPlans.delete(webviewId)
     for (const [preload, plan] of this.guestAttachments) {
-      if (plan.init.webviewId === webviewId) { this.guestAttachments.delete(preload); pending = true }
+      if (plan.init.webviewId !== webviewId) continue
+      this.guestAttachments.delete(preload)
+      const ids = this.guestAttachmentIds.get(plan.host)
+      if (ids) {
+        for (const [instanceId, attached] of ids) {
+          if (attached === plan) ids.delete(instanceId)
+        }
+        if (!ids.size) this.guestAttachmentIds.delete(plan.host)
+      }
+      pending = true
     }
     const page = this.deps.webviews.peek(webviewId)
     if (page) page.close()
@@ -250,10 +260,28 @@ export class Factory implements WindowFactory {
       preferences.preload = plan.preload
       preferences.webviewTag = false
       preferences.nodeIntegrationInSubFrames = false
+      const instanceId = params?.instanceId
+      const ids = this.guestAttachmentIds.get(webview) ?? new Map()
+      if (typeof instanceId !== 'number' || !Number.isSafeInteger(instanceId) || ids.has(instanceId)) { event.preventDefault(); return }
       this.guestPlans.delete(plan.init.webviewId)
       this.guestAttachments.set(plan.preload, plan)
+      ids.set(instanceId, plan)
+      this.guestAttachmentIds.set(webview, ids)
     })
-    contents.on('did-attach-webview', (_event, guest) => this.adoptGuest(webview, guest))
+    contents.on('did-attach-webview', (_event, guest) => {
+      const instanceId = (guest as WebContents & { viewInstanceId?: number }).viewInstanceId
+      const ids = this.guestAttachmentIds.get(webview)
+      if (typeof instanceId === 'number' && Number.isSafeInteger(instanceId)) {
+        const plan = ids?.get(instanceId)
+        if (plan && ids) {
+          ids.delete(instanceId)
+          if (!ids.size) this.guestAttachmentIds.delete(webview)
+          this.adoptGuest(webview, guest, guest.getURL(), plan)
+          return
+        }
+      }
+      this.adoptGuest(webview, guest)
+    })
   }
 
   private guestPreferences(host: Webview, preferences: WebPreferences): void {
@@ -264,14 +292,10 @@ export class Factory implements WindowFactory {
     preferences.webviewTag = host.window.configuration.webviewTag ?? true
   }
 
-  private adoptGuest(host: Webview, contents: WebContents, url = contents.getURL()): void {
+  private adoptGuest(host: Webview, contents: WebContents, url = contents.getURL(), attachedPlan?: { host: Webview; init: WebviewInit; preload: string }): void {
     if (this.deps.webviews.forContents(contents.id)) return
-    const plans = [...this.guestAttachments.values()].filter(plan => plan.host === host)
-    const plan = plans.find(plan => plan.init.url === url)
-    if (!plan && plans.length && (!url || url === 'about:blank')) {
-      contents.once('did-start-navigation', (_event, nextUrl) => this.adoptGuest(host, contents, nextUrl))
-      return
-    }
+    const plan = attachedPlan && this.guestAttachments.get(attachedPlan.preload) === attachedPlan ? attachedPlan : undefined
+    if (!plan && [...this.guestAttachments.values()].some(plan => plan.host === host)) return
     const window = host.window
     if (plan) this.guestAttachments.delete(plan.preload)
     const webviewId = plan?.init.webviewId ?? Factory.nextGuestWebviewId++

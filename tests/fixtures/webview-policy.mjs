@@ -383,7 +383,7 @@ async function managedGuest() {
   await runtime.handle('webview.create', { windowId: 1, webviewId: 41, guestHost: 10, url, initScripts: ['window.guestInitialized = true'] })
   assert.equal(runtime.webviews.peek(41), undefined)
   const preferences = {}
-  host.emit('will-attach-webview', { preventDefault() { assert.fail('trusted host rejected') } }, preferences, { src: url })
+  host.emit('will-attach-webview', { preventDefault() { assert.fail('trusted host rejected') } }, preferences, { src: url, instanceId: 701 })
   assert.equal(preferences.webviewTag, false)
   const source = nativeFs.readFileSync(preferences.preload, 'utf8')
   for (const origin of [new URL(url).origin, 'https://foreign.invalid']) {
@@ -396,12 +396,13 @@ async function managedGuest() {
     assert.equal(Boolean(page.window.guestInitialized), origin === new URL(url).origin)
   }
   const contents = new Contents()
+  contents.emit('did-start-navigation', {}, url, false, true)
+  contents.viewInstanceId = 701
   host.emit('did-attach-webview', {}, contents)
-  assert.equal(runtime.webviews.forContents(contents.id), undefined)
+  const page = runtime.webviews.get(41)
+  assert.equal(page.id, 41)
   contents.url = url
   contents.mainFrame = { url, origin: new URL(url).origin }
-  contents.emit('did-start-navigation', {}, url, false, true)
-  const page = runtime.webviews.get(41)
   assert.equal(page.contents, contents)
   contents.executeJavaScript = async script => ({ contentsId: contents.id, script })
   assert.deepEqual(await runtime.handle('webview.eval', { webviewId: 41, script: 'guest callback' }), { contentsId: contents.id, script: 'guest callback' })
@@ -410,6 +411,10 @@ async function managedGuest() {
   ipc({ sender: contents, senderFrame: contents.mainFrame }, 'trusted guest')
   assert.equal(messages[at].params.webviewId, 41)
   assert.equal(messages[at].params.url, url)
+  const fetched = await ipcHandlers.get('tauri-ipc-fetch')({ sender: contents, senderFrame: contents.mainFrame }, {
+    url: 'ipc://localhost/guest', method: 'POST', headers: [], body: Uint8Array.of(7),
+  })
+  assert.equal(fetched.status, 200)
   const replies = []
   defaultSession.beforeRequest({ webContentsId: contents.id, resourceType: 'mainFrame', url: 'https://foreign.invalid/' }, reply => replies.push(reply))
   assert.equal(replies[0].cancel, true)
@@ -424,12 +429,21 @@ async function managedGuest() {
   await runtime.handle('webview.close', { webviewId: 42 })
   assert.equal(runtime.factory.guestPlans.size, 0)
   const simultaneous = [44, 45].map(webviewId => ({ webviewId, url: `${url}&id=${webviewId}`, contents: new Contents() }))
-  for (const guest of simultaneous) {
+  for (const [index, guest] of simultaneous.entries()) {
     await runtime.handle('webview.create', { windowId: 1, webviewId: guest.webviewId, guestHost: 10, url: guest.url })
-    host.emit('will-attach-webview', { preventDefault() { assert.fail('trusted host rejected') } }, {}, { src: guest.url })
+    host.emit('will-attach-webview', { preventDefault() { assert.fail('trusted host rejected') } }, {}, { src: guest.url, instanceId: 710 + index })
   }
-  for (const guest of simultaneous) {
-    guest.contents.url = guest.url
+  const secondUrl = 'http://127.0.0.1:43129/?guest=host-two'
+  await runtime.handle('webview.create', { windowId: 2, webviewId: 46, guestHost: 30, url: secondUrl })
+  const hostTwo = runtime.webviews.get(30).contents
+  hostTwo.emit('will-attach-webview', { preventDefault() { assert.fail('trusted host rejected') } }, {}, { src: secondUrl, instanceId: 710 })
+  const crossHostGuest = new Contents()
+  crossHostGuest.viewInstanceId = 710
+  crossHostGuest.url = secondUrl
+  hostTwo.emit('did-attach-webview', {}, crossHostGuest)
+  assert.equal(runtime.webviews.forContents(crossHostGuest.id)?.id, 46)
+  for (const [index, guest] of simultaneous.toReversed().entries()) {
+    guest.contents.viewInstanceId = 711 - index
     host.emit('did-attach-webview', {}, guest.contents)
   }
   assert.deepEqual(simultaneous.map(guest => runtime.webviews.forContents(guest.contents.id)?.id), [44, 45])
