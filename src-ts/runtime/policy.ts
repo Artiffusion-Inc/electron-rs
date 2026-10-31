@@ -57,6 +57,7 @@ export class Policies {
     })
     session.setPermissionRequestHandler((contents, permission, callback, details) => {
       const webview = this.host.webviews.forContents(contents.id); const kind = permissionKind(permission, details as { mediaTypes?: string[] })
+      if (webview && permission === 'clipboard-sanitized-write') { callback(true); return }
       if (!webview?.webviewPolicy?.permission || !kind) { callback(false); return }
       const id = ++this.nextPermissionRequest; this.permissions.set(id, callback); this.host.transport.send('permission.requested', { id, webviewId: webview.id, kind })
     })

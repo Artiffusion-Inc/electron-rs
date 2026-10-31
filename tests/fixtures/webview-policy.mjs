@@ -459,6 +459,45 @@ async function managedGuest() {
   return { identity: 41, callbacks: true, trustedPreload: true, foreignIpcDenied: true, foreignNavigationDenied: true, canceled: true, hostCleanup: true }
 }
 
+async function clipboard() {
+  const url = 'http://127.0.0.1:43129/'
+  await runtime.handle('webview.create', { windowId: 1, webviewId: 41, guestHost: 10, url })
+  window.webContents.emit('will-attach-webview', { preventDefault() { assert.fail('trusted host rejected') } }, {}, { src: url, instanceId: 701 })
+  const guest = new Contents()
+  guest.emit('did-start-navigation', {}, url, false, true)
+  guest.viewInstanceId = 701
+  window.webContents.emit('did-attach-webview', {}, guest)
+  assert.equal(runtime.webviews.get(41).contents, guest)
+  for (const [contents, allowed] of [[window.webContents, true], [child.webContents, true], [noHandler.webContents, true], [guest, true], [{ id: 999 }, false]]) {
+    const replies = []
+    const before = messages.length
+    defaultSession.permissionRequest(contents, 'clipboard-sanitized-write', reply => replies.push(reply), {})
+    assert.deepEqual(replies, [allowed], 'sanitized writes require a registered webview, not a read permission handler')
+    assert.equal(messages.length, before, 'sanitized writes never request clipboard-read permission')
+  }
+  for (const [response, allowed] of [['deny', false], ['default', false], ['allow', true]]) {
+    const replies = []
+    const before = messages.length
+    defaultSession.permissionRequest(child.webContents, 'clipboard-read', reply => replies.push(reply), {})
+    assert.deepEqual(replies, [], 'clipboard reads wait for an explicit decision')
+    assert.equal(messages.length, before + 1)
+    const request = messages[before].params
+    assert.equal(request.kind, 'clipboard-read')
+    assert.equal(request.webviewId, 20)
+    runtime.handle('webview.permissionResponse', { id: request.id, response })
+    assert.deepEqual(replies, [allowed])
+  }
+  for (const permission of ['clipboard-read', 'clipboard-write', 'clipboard-unsanitized-write', 'unknown']) {
+    const replies = []
+    const before = messages.length
+    defaultSession.permissionRequest(noHandler.webContents, permission, reply => replies.push(reply), {})
+    assert.deepEqual(replies, [false], 'unhandled reads and unknown permission names remain denied')
+    assert.equal(messages.length, before)
+  }
+  assert.equal(runtime.state.permissionRequests.size, 0)
+  return { sanitizedWrites: true, readsRequireExplicitAllow: true, unknownPermissionsDenied: true }
+}
+
 function permissions() {
   const decisions = []
   for (const [permission, details, response, contents] of [
@@ -633,7 +672,7 @@ try {
   for (const contents of [window.webContents, child.webContents]) {
     for (const listener of contents.listeners('destroyed')) lifecycleDestroyedListeners.add(listener)
   }
-  const scenarios = { navigation, preload, permissions, sessions, guest, lifecycle, 'managed-guest': managedGuest }
+  const scenarios = { navigation, preload, permissions, clipboard, sessions, guest, lifecycle, 'managed-guest': managedGuest }
   const scenario = scenarios[process.argv[2]]
   if (typeof scenario !== 'function') throw new Error(`unknown webview scenario: ${process.argv[2]}`)
   console.log(JSON.stringify(await scenario()))
