@@ -307,9 +307,9 @@ const preferencesOf = (options) => {
   const { javascript, devTools, backgroundThrottling, userAgent, webviewTag } = options.webPreferences
   return { javascript, devTools, backgroundThrottling, userAgent: userAgent ?? null, webviewTag }
 }
-const createHost = async (main = false) => {
+const createHost = async (main = false, window = {}) => {
   await call('window.create', main
-    ? { windowId: 2, width: 640, height: 480, webview: { webviewId: 20, url: 'tauri://localhost/main' } }
+    ? { windowId: 2, width: 640, height: 480, ...window, webview: { webviewId: 20, url: 'tauri://localhost/main' } }
     : { windowId: 1, width: 800, height: 600 })
   return inspect(`state.windows.get(${main ? 2 : 1})`)
 }
@@ -670,7 +670,7 @@ switch (process.argv[2]) {
     break
   }
   case 'effects': {
-    const main = await createHost(true)
+    const main = await createHost(true, { window: { transparent: true } })
     await call('window.backgroundColor', { windowId: 2, color: '#00000000' })
     await call('window.backgroundMaterial', { windowId: 2, material: 'none' })
     const initialClear = main.color
