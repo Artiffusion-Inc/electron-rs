@@ -87,6 +87,8 @@ pub struct Electron {
   next_id: AtomicU64,
   closed: AtomicBool,
   child: Mutex<Option<Child>>,
+  #[cfg(windows)]
+  job: Mutex<Option<std::os::windows::io::OwnedHandle>>,
   /// Version reported by Electron during the handshake.
   pub version: String,
 }
@@ -196,7 +198,11 @@ impl Electron {
     let mut child = command
       .spawn()
       .map_err(|error| Error::with_source(format!("spawn {}", binary.display()), error))?;
+    #[cfg(windows)]
+    let mut job = None;
     let startup = (|| {
+      #[cfg(windows)]
+      { job = Some(process_job(&child)?); }
       // Only the child inherits this pipe. Never expose the credential in argv,
       // environment variables, files or diagnostics readable by another app.
       writeln!(child.stdin.take().ok_or("Electron stdin unavailable")?, "{token}")?;
@@ -272,6 +278,8 @@ impl Electron {
       next_id: AtomicU64::new(0),
       closed: AtomicBool::new(false),
       child: Mutex::new(Some(child)),
+      #[cfg(windows)]
+      job: Mutex::new(job),
       version,
     });
     // Drop also reaps the child if starting the reader thread fails.
@@ -460,6 +468,8 @@ impl Electron {
   pub fn shutdown(&self) {
     self.disconnect();
     let _ = self.shutdown_stream.shutdown(Shutdown::Both);
+    #[cfg(windows)]
+    self.job.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
     if let Some(mut child) = self
       .child
       .lock()
@@ -593,6 +603,33 @@ impl Electron {
 impl Drop for Electron {
   fn drop(&mut self) {
     self.shutdown();
+  }
+}
+
+#[cfg(windows)]
+fn process_job(child: &Child) -> Result<std::os::windows::io::OwnedHandle, Error> {
+  use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+  use windows::{core::PCWSTR, Win32::{Foundation::HANDLE, System::JobObjects::{
+    AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject,
+    JobObjectExtendedLimitInformation, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+  }}};
+  unsafe {
+    let handle = CreateJobObjectW(None, PCWSTR::null())
+      .map_err(|error| Error::with_source("create Electron process job", error))?;
+    let job = OwnedHandle::from_raw_handle(handle.0);
+    let limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
+      BasicLimitInformation: windows::Win32::System::JobObjects::JOBOBJECT_BASIC_LIMIT_INFORMATION {
+        LimitFlags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        ..Default::default()
+      },
+      ..Default::default()
+    };
+    SetInformationJobObject(handle, JobObjectExtendedLimitInformation, &limits as *const _ as _, std::mem::size_of_val(&limits) as u32)
+      .map_err(|error| Error::with_source("configure Electron process job", error))?;
+    AssignProcessToJobObject(handle, HANDLE(child.as_raw_handle()))
+      .map_err(|error| Error::with_source("assign Electron process job", error))?;
+    Ok(job)
   }
 }
 
@@ -762,6 +799,8 @@ mod tests {
       next_id: AtomicU64::new(0),
       closed: AtomicBool::new(false),
       child: Mutex::new(None),
+      #[cfg(windows)]
+      job: Mutex::new(None),
       version,
     });
     (electron, peer, reader)
