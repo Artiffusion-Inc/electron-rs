@@ -18,6 +18,7 @@ export interface AppKit {
   setMaximizable(handle: Buffer, enabled: boolean): void
   isMaximizable(handle: Buffer): boolean
   setTrafficLightPosition(handle: Buffer, x: number, y: number): void
+  startDrag(handle: Buffer): void
 }
 
 let loaded: AppKit | undefined

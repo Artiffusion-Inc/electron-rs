@@ -122,6 +122,7 @@ function windowCommands(ctx: CommandContext): CommandTable {
     'window.displayForPoint': (p) => displayAtPoint(ctx.display, p.x, p.y),
     'window.titleBarStyle': (p) => { window(p).setTitleBarStyle(p.style); return null },
     'window.trafficLight': (p) => { window(p).setTrafficLight(p); return null },
+    'window.startDrag': (p) => { window(p).startDragging(); return null },
   }
 }
 
