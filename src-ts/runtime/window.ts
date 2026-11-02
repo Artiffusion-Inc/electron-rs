@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import os from 'node:os'
 import { Menu, nativeImage } from 'electron'
-import type { App, BaseWindow, BrowserWindow, NativeImage, NativeTheme, Rectangle, WebContents } from 'electron'
+import type { App, BaseWindow, BrowserWindow, MenuItemConstructorOptions, NativeImage, NativeTheme, Rectangle, WebContents } from 'electron'
 import { displayForBounds, findDisplay, type DisplayInfo, type DisplaySource } from './display'
 import { readContentsTheme } from './native/theme'
 import type { AppKit } from './native/appkit'
@@ -30,7 +30,7 @@ export interface WindowConfig extends Record<string, unknown> {
   webviewTag?: boolean
 }
 export interface WindowMenuItem {
-  type?: 'separator'; label?: string; enabled?: boolean; accelerator?: string
+  type?: 'separator' | 'checkbox'; role?: MenuItemConstructorOptions['role']; label?: string; enabled?: boolean; accelerator?: string
   checked?: boolean; commandId?: number; submenu?: WindowMenuItem[]
 }
 export interface SizeParams { width?: number; height?: number; physical?: boolean }
@@ -54,6 +54,22 @@ type NativeWindow = BaseWindow & {
   setBackgroundMaterial?(material: 'none' | 'acrylic' | 'mica' | 'tabbed'): void
 }
 type FullscreenRestore = { bounds: Rectangle; maximized: boolean }
+
+export function menuTemplate(items: WindowMenuItem[], command: (id: number) => void): MenuItemConstructorOptions[] {
+  return items.map(item => {
+    if (item.type === 'separator') return { type: 'separator' }
+    const entry: MenuItemConstructorOptions = { label: item.label, enabled: item.enabled !== false, ...(item.accelerator ? { accelerator: item.accelerator } : {}) }
+    if (item.role) entry.role = item.role
+    if (item.type === 'checkbox' || item.checked === true) Object.assign(entry, { type: 'checkbox', checked: item.checked === true })
+    if (item.submenu) entry.submenu = menuTemplate(item.submenu, command)
+    else if (!item.role && item.commandId !== undefined) {
+      const id = item.commandId
+      if (!Number.isInteger(id) || id < 0 || id > 0xffffffff) throw new Error('invalid menu command ID')
+      entry.click = () => command(id)
+    }
+    return entry
+  })
+}
 
 export class Window extends EventEmitter<WindowEvents> {
   private closable: boolean
@@ -343,14 +359,7 @@ export class Window extends EventEmitter<WindowEvents> {
 
   setMenu(menu: WindowMenuItem[] | null | { items?: WindowMenuItem[] }): void {
     const items = menu === null ? null : Array.isArray(menu) ? menu : menu.items ?? []
-    const template = (entries: WindowMenuItem[]): import('electron').MenuItemConstructorOptions[] => entries.map(item => {
-      if (item.type === 'separator') return { type: 'separator' }
-      const entry: import('electron').MenuItemConstructorOptions = { label: item.label, enabled: item.enabled !== false, ...(item.accelerator ? { accelerator: item.accelerator } : {}) }
-      if (item.submenu) entry.submenu = template(item.submenu)
-      else { if (item.checked) Object.assign(entry, { type: 'checkbox', checked: true }); entry.click = () => { if (!this.destroyed) this.emit('menuCommand', item.commandId) } }
-      return entry
-    })
-    this.native.setMenu(items === null ? null : Menu.buildFromTemplate(template(items)))
+    this.native.setMenu(items === null ? null : Menu.buildFromTemplate(menuTemplate(items, id => { if (!this.destroyed) this.emit('menuCommand', id) })))
     if (items !== null) { this.native.setAutoHideMenuBar(false); this.native.setMenuBarVisibility(true) }
     this.appliedConstraints = undefined; this.applyConstraints(); setImmediate(() => this.applyConstraints())
   }

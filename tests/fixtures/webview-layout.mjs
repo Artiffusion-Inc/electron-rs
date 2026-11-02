@@ -12,6 +12,7 @@ const require = createRequire(import.meta.url)
 let nextId = 0
 let ready
 let contextMenu
+let applicationMenu
 const timers = new Set()
 const tasks = []
 const transport = new EventEmitter()
@@ -236,7 +237,7 @@ const appkit = {
 }
 const electron = {
   app: { on() {}, quit() {}, whenReady: () => new Promise((resolve) => { ready = resolve }) },
-  Menu: { setApplicationMenu() {}, buildFromTemplate: (template) => ({ template,
+  Menu: { setApplicationMenu(menu) { applicationMenu = menu }, buildFromTemplate: (template) => ({ template,
     popup(options) { this.options = options; contextMenu = this },
     closePopup() { this.closed = true },
   }) },
@@ -253,7 +254,7 @@ const context = vm.createContext({
       : name.endsWith('appkit.node') ? appkit : require(name),
   process: { argv: ['node', 'main.cjs', '--port', '1'], env: {}, platform:
     ['backgrounds', 'linux-state', 'linux-focus'].includes(process.argv[2]) ? 'linux'
-      : ['macos-center-focus', 'lifecycle', 'restore'].includes(process.argv[2]) ? 'darwin' : 'win32' },
+      : ['macos-center-focus', 'lifecycle', 'restore', 'app-menu'].includes(process.argv[2]) ? 'darwin' : 'win32' },
   Buffer, URL, Error, console,
   setTimeout(callback, delay) { const timer = { callback, delay }; timers.add(timer); return timer },
   clearTimeout: (timer) => timers.delete(timer),
@@ -908,6 +909,60 @@ switch (process.argv[2]) {
     const legacy = host.children.map((view) => cursorStyles(view.webContents))
     result = { chosen, hidden, chosenWhileHidden, inheritedHidden, visible, restored, inheritedVisible, legacy,
       host: mainContentsOf(host)?.inserted ?? [], other: mainContentsOf(other).inserted, removed: first.removed.length }
+    break
+  }
+  case 'app-menu': {
+    ready()
+    await settle()
+    assert.equal(applicationMenu, null)
+    const events = []
+    context.send = message => events.push(structuredClone(message))
+    const roles = ['hide', 'hideOthers', 'unhide', 'quit', 'close', 'undo', 'redo', 'cut', 'copy', 'paste', 'selectAll', 'minimize', 'zoom', 'front', 'services', 'windowMenu', 'help']
+    runtime.ipc.emit('request', { id: 1, method: 'app.setMenu', params: { menu: [{ label: 'Application', enabled: false, submenu: [
+      { label: 'Open', enabled: true, accelerator: 'CmdOrCtrl+O', commandId: 0 },
+      { label: 'Pinned', type: 'checkbox', checked: false, commandId: 0xffffffff },
+      { label: 'Checked', checked: true, commandId: 2 },
+      { type: 'separator' },
+      ...roles.map(role => ({ label: role, role, commandId: 99 })),
+    ] }] } }, false)
+    assert.deepEqual(events.splice(0), [{ id: 1, result: null }])
+    const first = applicationMenu.template[0]
+    assert.equal(first.label, 'Application')
+    assert.equal(first.enabled, false)
+    const [open, pinned, checked, separator, ...predefined] = first.submenu
+    assert.deepEqual(JSON.parse(JSON.stringify(open)), { label: 'Open', enabled: true, accelerator: 'CmdOrCtrl+O' })
+    assert.deepEqual(JSON.parse(JSON.stringify(pinned)), { label: 'Pinned', enabled: true, type: 'checkbox', checked: false })
+    assert.equal(checked.type, 'checkbox')
+    assert.equal(checked.checked, true)
+    assert.deepEqual(JSON.parse(JSON.stringify(separator)), { type: 'separator' })
+    assert.deepEqual(Array.from(predefined, item => item.role), roles)
+    assert.ok(predefined.every(item => item.click === undefined))
+    open.click()
+    pinned.click()
+    assert.deepEqual(events.splice(0), [
+      { event: 'app.menuCommand', params: { commandId: 0 } },
+      { event: 'app.menuCommand', params: { commandId: 0xffffffff } },
+    ])
+    await call('app.setMenu', { menu: [{ label: 'Replacement', commandId: 0 }] })
+    const replacement = applicationMenu.template[0]
+    open.click()
+    pinned.click()
+    replacement.click()
+    assert.deepEqual(events.splice(0), [{ event: 'app.menuCommand', params: { commandId: 0 } }])
+    assert.throws(() => call('app.setMenu', { menu: [{ commandId: -1 }] }), /invalid menu command ID/)
+    replacement.click()
+    assert.deepEqual(events.splice(0), [{ event: 'app.menuCommand', params: { commandId: 0 } }])
+    await call('app.setMenu', { menu: null })
+    assert.equal(applicationMenu, null)
+    replacement.click()
+    assert.deepEqual(events, [])
+    await call('app.setMenu', { menu: [] })
+    assert.equal(applicationMenu.template.length, 0)
+    await call('app.setMenu', { menu: [{ label: 'Disconnected', commandId: 3 }] })
+    runtime.state.socket = null
+    applicationMenu.template[0].click()
+    assert.deepEqual(events, [])
+    result = { applicationMenu: 'PASS' }
     break
   }
   case 'parent-menu': {
