@@ -117,7 +117,7 @@ export class Factory implements WindowFactory {
       const origin = new URL(init.url).origin
       if (host.window !== window || host.adopted || origin === 'null' || [...this.guestPlans.values()].some(plan => plan.host === host && plan.init.url === init.url)) throw new Error('invalid or duplicate guest registration')
       init.ipcOrigin = origin
-      const preload = this.writeInitPreload(webviewId, params.initScripts, origin)
+      const preload = this.writeInitPreload(webviewId, params.initScripts, origin, params.preloadScripts)
       this.guestPlans.set(webviewId, { host, init, preload })
       return { webviewId }
     }
@@ -216,19 +216,20 @@ export class Factory implements WindowFactory {
     return {
       contextIsolation: true, sandbox: true, nodeIntegration: false, webviewTag: webview.browserHost === true || (config.webviewTag ?? true),
       nodeIntegrationInSubFrames: true, session: target,
-      preload: this.writeInitPreload(webview.webviewId, webview.initScripts),
+      preload: this.writeInitPreload(webview.webviewId, webview.initScripts, undefined, webview.preloadScripts),
       javascript: config.javascriptDisabled !== true, devTools: config.devtools !== false,
       backgroundThrottling: config.backgroundThrottling !== 'disabled',
     }
   }
 
-  private writeInitPreload(webviewId?: number, initScripts?: unknown[], origin?: string): string {
+  private writeInitPreload(webviewId?: number, initScripts?: unknown[], origin?: string, preloadScripts?: unknown[]): string {
     const scripts = (initScripts ?? []).map((item) => typeof item === 'string' ? { script: item, mainFrameOnly: true } : item)
-    if (!scripts.length && !origin) return path.join(__dirname, '..', 'preload.cjs')
+    const extra = (preloadScripts ?? []).filter((item): item is string => typeof item === 'string')
+    if (!scripts.length && !origin && !extra.length) return path.join(__dirname, '..', 'preload.cjs')
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tauri-runtime-electron-preload-'))
     const file = path.join(directory, `${webviewId ?? 'guest'}.cjs`)
     app.once('will-quit', () => fs.rmSync(directory, { recursive: true, force: true }))
-    const source = `${fs.readFileSync(path.join(__dirname, '..', 'preload.cjs'), 'utf8')}\nfor (const entry of ${JSON.stringify(scripts)}) {\n  if (${JSON.stringify(origin ?? null)} && location.origin !== ${JSON.stringify(origin ?? null)}) continue\n  if (entry.mainFrameOnly && !process.isMainFrame) continue\n  try { require('electron').webFrame.executeJavaScript(entry.script) } catch (error) { console.error('init script failed', error) }\n}\n`
+    const source = `${fs.readFileSync(path.join(__dirname, '..', 'preload.cjs'), 'utf8')}\n${extra.map(script => `\n${script}\n`).join('')}for (const entry of ${JSON.stringify(scripts)}) {\n  if (${JSON.stringify(origin ?? null)} && location.origin !== ${JSON.stringify(origin ?? null)}) continue\n  if (entry.mainFrameOnly && !process.isMainFrame) continue\n  try { require('electron').webFrame.executeJavaScript(entry.script) } catch (error) { console.error('init script failed', error) }\n}\n`
     fs.writeFileSync(file, source)
     return file
   }

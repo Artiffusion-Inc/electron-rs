@@ -289,7 +289,7 @@ async function preload() {
       const invoked = []
       const page = vm.createContext({ window: { fetch() {} }, location: { href: 'https://page.invalid/' }, URL, Request })
       const required = new Set()
-      vm.runInNewContext(source, {
+      const sandbox = {
         require(name) {
           assert.equal(name, 'electron', 'sandboxed preload dependencies remain Electron-only')
           required.add(name)
@@ -303,7 +303,8 @@ async function preload() {
           }
         },
         process: { isMainFrame }, console,
-      })
+      }
+      vm.runInNewContext(source, sandbox)
       let fetchReply = null
       let fetchCall = null
       if (page.window.ipc) {
@@ -322,6 +323,7 @@ async function preload() {
           nodeIntegration: preferences.nodeIntegration, nodeIntegrationInSubFrames: preferences.nodeIntegrationInSubFrames,
         },
         mainScript: page.mainScript ?? null, everyFrameScript: page.everyFrameScript ?? null,
+        preloadScript: sandbox.preloadScript ?? null,
         hasIpc: Boolean(page.window.ipc), sent, fetchCall, fetchReply,
       })
     }
@@ -658,7 +660,7 @@ try {
   ]
   await runtime.handle('window.create', {
     windowId: 1, trafficLightPosition: { x: 12, y: 18 }, tabbingIdentifier: 'editor-tabs',
-    webview: { webviewId: 10, url: 'https://page.invalid/', initScripts: scripts, policy: { navigation: true, permission: true } },
+    webview: { webviewId: 10, url: 'https://page.invalid/', initScripts: scripts, preloadScripts: ['globalThis.preloadScript = (globalThis.preloadScript ?? 0) + 1'], policy: { navigation: true, permission: true } },
   })
   runtime.state.installPolicyHandlers(defaultSession)
   window = runtime.windows.get(1).native

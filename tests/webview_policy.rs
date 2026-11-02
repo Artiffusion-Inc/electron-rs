@@ -161,6 +161,11 @@ fn generated_preloads_scope_initialization_and_ipc_to_the_right_frames() {
       if is_main { json!(1) } else { Value::Null }
     );
     assert_eq!(frame["everyFrameScript"], 1);
+    assert_eq!(
+      frame["preloadScript"],
+      if owner == "main" { json!(1) } else { Value::Null },
+      "extra preload sources belong to the configured webview in every frame"
+    );
     assert_eq!(frame["hasIpc"], is_main);
     if is_main {
       assert_eq!(frame["sent"], json!([["tauri-ipc", "42"]]));

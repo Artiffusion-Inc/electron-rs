@@ -513,6 +513,10 @@ pub mod webview {
     pub user_agent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub init_scripts: Option<Vec<InitScript>>,
+    /// Preload sources appended to this webview's own preload, so they run in
+    /// the isolated world where `require('electron')` is available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preload_scripts: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub background_color: Option<Color>,
     #[serde(skip_serializing_if = "Option::is_none")]
