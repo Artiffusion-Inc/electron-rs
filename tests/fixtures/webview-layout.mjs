@@ -1295,6 +1295,9 @@ switch (process.argv[2]) {
     await call('window.create', { windowId: 63,
       window: { width: 640, height: 400, center: true, focus: false } })
     const host = inspect('state.windows.get(63)')
+    await call('window.create', { windowId: 64, window: { width: 320, height: 200, maximizable: false } })
+    const unmaximizable = inspect('state.windows.get(64)')
+    assert.equal(unmaximizable.nativeMaximizable, false, 'macOS builder must forward maximizable before the window is shown')
     const builder = host.getBounds()
     host.frame = { width: 20, height: 40 }
     host.setBounds({ x: 2000, y: 50, width: 480, height: 340 })
