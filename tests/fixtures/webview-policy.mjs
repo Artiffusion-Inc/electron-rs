@@ -183,7 +183,7 @@ function begin(contents, resourceType = 'mainFrame', byId = false, target = defa
   const stopsAtReply = []
   const details = Object.freeze({
     ...(byId ? { webContentsId: contents.id } : { webContents: contents }),
-    id: requestId, resourceType, url: 'https://submit.invalid/form', method: 'POST',
+    id: requestId, resourceType, url: resourceType === 'subFrame' ? 'https://cross.invalid/frame' : 'https://submit.invalid/form', method: 'POST',
     uploadData: [{ bytes: Buffer.from('original POST body') }],
   })
   const before = messages.length
@@ -206,7 +206,9 @@ const cleanup = () => ({
   destroyedListeners: [window.webContents, child.webContents].map((contents) =>
     contents.listeners('destroyed').filter((listener) => !lifecycleDestroyedListeners.has(listener)).length),
 })
-function navigation() {
+async function navigation() {
+  await runtime.handle('webview.create', { windowId: 1, webviewId: 50, url: 'https://page.invalid/', ipcOrigin: 'https://page.invalid', policy: { navigation: true } })
+  const scoped = runtime.webviews.get(50).view.webContents
   const main = begin(window.webContents)
   const subframe = begin(child.webContents, 'subFrame', true)
   const waiting = {
@@ -239,6 +241,15 @@ function navigation() {
   catch (error) { stopError = error.message }
   finally { window.webContents.stop = stop }
   const rejected = { invalidAllow: navigationState(invalidAllow), failedStop: navigationState(failedStop), stopError, cleanup: cleanup() }
+  const crossOrigin = []
+  for (const resourceType of ['mainFrame', 'subFrame']) {
+    const replies = []
+    const before = messages.length
+    defaultSession.beforeRequest({ webContents: scoped, id: ++nextRequest, resourceType, url: 'https://cross.invalid/frame', method: 'GET' }, (reply) => replies.push(plain(reply)))
+    const request = messages.length > before ? messages[before].params : null
+    if (request) runtime.handle('webview.navigationResponse', { id: request.id, allow: false })
+    crossOrigin.push({ resourceType, request, replies })
+  }
   const lifecycle = []
   for (const reason of ['timeout', 'destroyed']) {
     const pending = begin(child.webContents)
@@ -275,7 +286,7 @@ function navigation() {
     }
   }
   return {
-    waiting, denied, decided, bypass, rejected, lifecycle, retired, popups, external,
+    waiting, denied, decided, bypass, rejected, crossOrigin, lifecycle, retired, popups, external,
     loads: [window.webContents.loads, child.webContents.loads], cleanup: cleanup(),
   }
 }

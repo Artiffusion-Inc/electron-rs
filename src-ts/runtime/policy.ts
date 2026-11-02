@@ -36,12 +36,12 @@ export class Policies {
       const contentsId = details.webContents?.id ?? details.webContentsId
       const webview = contentsId === undefined ? undefined : this.host.webviews.forContents(contentsId)
       const contents = webview?.contents
-      if (webview && ['mainFrame', 'subFrame'].includes(details.resourceType) && !webview.acceptsIpc(details.url)) { callback({ cancel: true }); return }
+      if (webview && details.resourceType === 'mainFrame' && !webview.acceptsIpc(details.url)) { callback({ cancel: true }); return }
       if (!contents || !['mainFrame', 'subFrame'].includes(details.resourceType) || !webview?.webviewPolicy?.navigation) { callback({}); return }
       const id = ++this.nextNavigationRequest
       const entry: NavigationEntry = { nativeId: details.id, contents, timer: undefined as unknown as NodeJS.Timeout, onDestroyed: () => finish(false) , finish: (allow, retired = false) => {
         if (!this.navigations.delete(id)) return; nativeNavigations.delete(details.id); clearTimeout(entry.timer); contents.removeListener('destroyed', entry.onDestroyed); if (retired || this.disposed) return
-        try { if (!allow && details.resourceType === 'mainFrame' && !contents.isDestroyed()) contents.stop() } finally { callback({ cancel: !allow }) }
+        try { if (!allow && details.resourceType === 'mainFrame' && !contents.isDestroyed()) contents.stop() } finally { callback({ cancel: !allow && details.resourceType === 'mainFrame' }) }
       } }
       const finish = (allow: boolean) => entry.finish(allow)
       entry.onDestroyed = () => finish(false); entry.timer = setTimeout(entry.onDestroyed, 15_000); entry.timer.unref(); this.navigations.set(id, entry); nativeNavigations.set(details.id, entry); contents.once('destroyed', entry.onDestroyed)
