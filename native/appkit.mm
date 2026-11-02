@@ -272,7 +272,13 @@ napi_value is_decorated(napi_env env, napi_callback_info info) {
   if (!args_for(env, info, 1, args)) return fail(env, "isDecorated expects a native window handle");
   NSWindow* window = window_for_view(env, args[0]);
   if (!window) return nullptr;
-  if (napi_get_boolean(env, (window.styleMask & NSWindowStyleMaskTitled) != 0, &result) != 0) {
+  // Electron keeps NSWindowStyleMaskTitled on frameless windows for shadow and
+  // corner rounding and hides the caption controls instead, so the mask alone
+  // over-reports a decorated frame. Report what is actually on screen.
+  NSButton* close = [window standardWindowButton:NSWindowCloseButton];
+  bool decorated = (window.styleMask & NSWindowStyleMaskTitled) != 0
+    && close && ![close isHiddenOrHasHiddenAncestor];
+  if (napi_get_boolean(env, decorated, &result) != 0) {
     return fail(env, "cannot read AppKit decorations");
   }
   return result;
