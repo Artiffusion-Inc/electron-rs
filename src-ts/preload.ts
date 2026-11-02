@@ -1,13 +1,14 @@
-import { contextBridge, ipcRenderer, webFrame } from 'electron'
+import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron'
 
 declare global {
-  interface Window { ipc: { postMessage(data: unknown): void; fetch(request: unknown): Promise<any> } }
+  interface Window { ipc: { postMessage(data: unknown): void; fetch(request: unknown): Promise<any>; pathForFile(file: File): string } }
 }
 
 if (process.isMainFrame) {
   contextBridge.exposeInMainWorld('ipc', {
     postMessage: (data: any) => ipcRenderer.send('tauri-ipc', String(data)),
     fetch: (req: any) => ipcRenderer.invoke('tauri-ipc-fetch', req),
+    pathForFile: (file: File) => webUtils.getPathForFile(file),
   })
 
   webFrame.executeJavaScript(`(${function installIpcFetch() {

@@ -171,10 +171,15 @@ fn generated_preloads_scope_initialization_and_ipc_to_the_right_frames() {
           "channel": "tauri-ipc-fetch", "body": [1, 2], "sameRequest": true, "calls": 1,
         })
       );
+      assert_eq!(
+        frame["pathFor"], "/host/dropped.txt",
+        "the main frame resolves dropped files through webUtils"
+      );
     } else {
       assert_eq!(frame["sent"], json!([]));
       assert!(frame["fetchReply"].is_null());
       assert!(frame["fetchCall"].is_null());
+      assert!(frame["pathFor"].is_null());
     }
   }
   assert_eq!(
