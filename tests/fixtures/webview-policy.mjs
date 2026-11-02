@@ -300,14 +300,12 @@ async function preload() {
               invoke: (...args) => { invoked.push(args); return Promise.resolve('reply') },
             },
             webFrame: { executeJavaScript: (script) => vm.runInContext(script, page) },
-            webUtils: { getPathForFile: (file) => `/host/${file.name}` },
           }
         },
         process: { isMainFrame }, console,
       })
       let fetchReply = null
       let fetchCall = null
-      let pathFor = null
       if (page.window.ipc) {
         page.window.ipc.postMessage(42)
         const request = { body: Uint8Array.of(1, 2) }
@@ -316,8 +314,6 @@ async function preload() {
           channel: invoked[0]?.[0], body: Array.from(invoked[0]?.[1]?.body ?? []),
           sameRequest: invoked[0]?.[1] === request, calls: invoked.length,
         }
-        pathFor = typeof page.window.ipc.pathForFile === 'function'
-          ? page.window.ipc.pathForFile({ name: 'dropped.txt' }) : null
       }
       frames.push({
         owner, isMainFrame, required: [...required],
@@ -326,7 +322,7 @@ async function preload() {
           nodeIntegration: preferences.nodeIntegration, nodeIntegrationInSubFrames: preferences.nodeIntegrationInSubFrames,
         },
         mainScript: page.mainScript ?? null, everyFrameScript: page.everyFrameScript ?? null,
-        hasIpc: Boolean(page.window.ipc), sent, fetchCall, fetchReply, pathFor,
+        hasIpc: Boolean(page.window.ipc), sent, fetchCall, fetchReply,
       })
     }
   }
