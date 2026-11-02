@@ -12,7 +12,8 @@ import { Policies } from './runtime/policy'
 import type { PopupPlan } from './runtime/policy'
 import { Protocols } from './runtime/protocol'
 import { Webviews } from './runtime/webview'
-import { Windows } from './runtime/window'
+import { menuTemplate, Windows } from './runtime/window'
+import type { WindowMenuItem } from './runtime/window'
 import { arg, noop } from './utils'
 import type { WebContents } from 'electron'
 
@@ -81,6 +82,17 @@ const ipc = new IPC(port, ready)
 // transport 才负责「请求 → 查表 → 回包」，是唯一能被替身替换的接缝。
 const transport = new Transport(ipc)
 const executions = new Executions(transport)
+let menuGeneration = 0
+
+function setMenu(menu: WindowMenuItem[] | null): void {
+  if (menu !== null && !Array.isArray(menu)) throw new Error('invalid application menu')
+  const generation = menuGeneration + 1
+  const native = menu === null ? null : Menu.buildFromTemplate(menuTemplate(menu, commandId => {
+    if (generation === menuGeneration && !transport.closed) transport.send('app.menuCommand', { commandId })
+  }))
+  Menu.setApplicationMenu(native)
+  menuGeneration = generation
+}
 
 // Window 的原生接缝：appkit / 光标 / 主题。只有这里知道 native 适配器。
 const environment = new Environment(webviews)
@@ -114,6 +126,7 @@ const commands = createCommands({
   protocols,
   app,
   nativeTheme,
+  setMenu,
   display: { screen, platform: process.platform },
   respond: (id, response) => transport.respond(id, response),
 })

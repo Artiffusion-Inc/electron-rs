@@ -7,7 +7,7 @@ import type { WindowFactory } from './factory'
 import type { Policies } from './policy'
 import type { Protocols } from './protocol'
 import type { CookieInit, Webview, Webviews } from './webview'
-import type { Window, Windows } from './window'
+import type { Window, Windows, WindowMenuItem } from './window'
 
 /**
  * 命令表：协议字符串 → 领域对象调用。
@@ -27,6 +27,7 @@ export interface CommandContext {
   readonly protocols: Protocols
   readonly display: DisplaySource
   readonly app: App
+  readonly setMenu: (menu: WindowMenuItem[] | null) => void
   readonly nativeTheme: NativeTheme
   readonly executions?: Executions
   /** 窗口与页面的创建涉及策略装配，由组合根提供。 */
@@ -181,6 +182,7 @@ function appCommands(ctx: CommandContext): CommandTable {
   const mac = (): boolean => ctx.display.platform === 'darwin'
 
   return {
+    'app.setMenu': (p) => { ctx.setMenu(p.menu); return null },
     'app.badgeLabel': (p) => { if (mac()) ctx.app.dock?.setBadge(p.label ?? ''); return null },
     'app.focus': (p) => { ctx.app.focus({ steal: p.steal === true }); return null },
     'app.show': () => { if (mac()) ctx.app.show(); return null },

@@ -230,6 +230,7 @@ pub mod window {
   #[serde(rename_all = "lowercase")]
   pub enum MenuItemType {
     Separator,
+    Checkbox,
   }
 
   #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -237,6 +238,8 @@ pub mod window {
   pub struct MenuItem {
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub kind: Option<MenuItemType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -687,6 +690,7 @@ pub mod app {
   }
 
   requests! {
+    SetMenu { menu: Option<Vec<window::MenuItem>> } => (), "app.setMenu", deferred = true;
     SetBadgeLabel { label: String } => (), "app.badgeLabel", deferred = true;
     Focus { steal: bool } => (), "app.focus", deferred = true;
     Show {} => (), "app.show", deferred = true;
@@ -876,6 +880,36 @@ mod tests {
       "protocol.respond",
       json!({"id": 10, "status": 200, "headers": {"content-type": "text/plain"}, "body": "aGk="}),
     );
+  }
+
+  #[test]
+  fn application_menu_preserves_roles_and_unchecked_checkboxes() {
+    round_trip(
+      app::SetMenu {
+        menu: Some(vec![window::MenuItem {
+          label: Some("Application".into()),
+          submenu: Some(vec![
+            window::MenuItem { role: Some("quit".into()), ..Default::default() },
+            window::MenuItem {
+              kind: Some(window::MenuItemType::Checkbox),
+              label: Some("Pinned".into()), enabled: Some(false),
+              accelerator: Some("CmdOrCtrl+P".into()), checked: Some(false),
+              command_id: Some(u32::MAX), ..Default::default()
+            },
+          ]),
+          ..Default::default()
+        }]),
+      },
+      "app.setMenu",
+      json!({"menu": [{"label": "Application", "submenu": [
+        {"role": "quit"},
+        {"type": "checkbox", "label": "Pinned", "enabled": false, "accelerator": "CmdOrCtrl+P", "checked": false, "commandId": 4294967295u32},
+      ]}]}),
+    );
+    round_trip(app::SetMenu { menu: None }, "app.setMenu", json!({"menu": null}));
+    round_trip(app::SetMenu { menu: Some(vec![]) }, "app.setMenu", json!({"menu": []}));
+    assert!(app::SetMenu { menu: None }.deferred());
+    response::<app::SetMenu>(Value::Null);
   }
 
   #[test]
