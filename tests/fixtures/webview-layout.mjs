@@ -229,6 +229,7 @@ const appkit = {
   setMaximizable(handle, enabled) { this.window(handle).nativeMaximizable = enabled },
   isMaximizable(handle) { return this.window(handle).nativeMaximizable !== false },
   setTrafficLightPosition(handle, x, y) { (this.window(handle).nativeInsets ??= []).push({ x, y }) },
+  startDrag(handle) { (this.window(handle).nativeDrags ??= []).push(handle.readBigUInt64LE().toString()) },
 }
 const electron = {
   app: { on() {}, quit() {}, whenReady: () => new Promise((resolve) => { ready = resolve }) },
@@ -1316,11 +1317,13 @@ switch (process.argv[2]) {
     assert.equal(host.nativeMaximizable, false)
     await call('window.maximizable', { windowId: 63, maximizable: true })
     assert.equal(host.nativeMaximizable, true)
+    await call('window.startDrag', { windowId: 63 })
+    assert.deepEqual(host.nativeDrags, ['1'], 'macOS drag goes to the native press handler, not Electron')
     context.process.platform = 'linux'
     let nativeCenters = 0
     host.center = () => { nativeCenters++ }
     await call('window.center', { windowId: 63 })
-    result = { builder, centered, focus, nativeCenters,
+    result = { builder, centered, focus, nativeCenters, nativeDrags: host.nativeDrags,
       fullscreen: host.options.fullscreen, fullscreenable: host.options.fullscreenable, trafficLights: initialTrafficLights }
     break
   }

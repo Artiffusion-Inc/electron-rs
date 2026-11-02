@@ -20,8 +20,11 @@ static char buttonInsetKey;
 // size change, so the inset is re-applied inside that layout pass instead of
 // racing it from notifications, which showed as a jump to the top-left corner.
 static Class dsh_inset_subclass(Class base) {
+  const char* baseName = class_getName(base);
+  // Re-running from the hooked layout must not stack another subclass pair.
+  if (strncmp(baseName, "DSHInset", 8) == 0) return base;
   char name[256];
-  snprintf(name, sizeof(name), "DSHInset%s", class_getName(base));
+  snprintf(name, sizeof(name), "DSHInset%s", baseName);
   Class existing = objc_getClass(name);
   if (existing) return existing;
   Class sub = objc_allocateClassPair(base, name, 0);

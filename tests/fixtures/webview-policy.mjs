@@ -342,7 +342,7 @@ async function preload() {
   return {
     frames, fetchErrors, messages: messages.slice(before).filter(message => message.event === 'ipc.message'),
     plainPreload: noHandler.options.webPreferences.preload === path.join(electronDirectory, 'preload.cjs'),
-    trafficLightPosition: window.options.trafficLightPosition, tabbingIdentifier: window.options.tabbingIdentifier,
+    electronTrafficLight: window.options.trafficLightPosition ?? null, tabbingIdentifier: window.options.tabbingIdentifier,
   }
 }
 async function guest() {
