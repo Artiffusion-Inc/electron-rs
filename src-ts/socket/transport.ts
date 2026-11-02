@@ -14,7 +14,7 @@ const synchronousMethods = new Set([
   'window.focus', 'window.close', 'window.destroy', 'window.visibleOnAllWorkspaces', 'window.enabled',
   'window.enabledQuery', 'window.progressBar', 'window.shadow', 'window.decorations', 'window.badgeCount',
   'window.overlayIcon', 'window.backgroundColor', 'window.backgroundMaterial', 'window.ignoreCursorEvents',
-  'window.displays', 'window.cursorPosition', 'window.currentDisplay', 'window.displayForPoint', 'window.trafficLight',
+  'window.displays', 'window.cursorPosition', 'window.currentDisplay', 'window.displayForPoint', 'window.trafficLight', 'window.startDrag',
 ])
 
 /**

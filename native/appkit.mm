@@ -10,22 +10,58 @@
 @interface DSHWindowButtonInset : NSObject
 @property(nonatomic, weak) NSWindow* window;
 @property(nonatomic) NSPoint inset;
+@property(nonatomic) BOOL applying;
 - (void)apply;
 @end
+
+static char buttonInsetKey;
+
+// AppKit owns the titlebar layout and resets the buttons on every key-status or
+// size change, so the inset is re-applied inside that layout pass instead of
+// racing it from notifications, which showed as a jump to the top-left corner.
+static Class dsh_inset_subclass(Class base) {
+  const char* baseName = class_getName(base);
+  // Re-running from the hooked layout must not stack another subclass pair.
+  if (strncmp(baseName, "DSHInset", 8) == 0) return base;
+  char name[256];
+  snprintf(name, sizeof(name), "DSHInset%s", baseName);
+  Class existing = objc_getClass(name);
+  if (existing) return existing;
+  Class sub = objc_allocateClassPair(base, name, 0);
+  if (!sub) return Nil;
+  IMP layout = imp_implementationWithBlock(^(id view) {
+    IMP original = class_getMethodImplementation(base, @selector(layout));
+    if (original) ((void (*)(id, SEL))original)(view, @selector(layout));
+    NSWindow* window = [(NSView*)view window];
+    DSHWindowButtonInset* inset = window ? objc_getAssociatedObject(window, &buttonInsetKey) : nil;
+    if (inset) [inset apply];
+  });
+  if (!class_addMethod(sub, @selector(layout), layout, "v@:")) {
+    objc_disposeClassPair(sub);
+    return Nil;
+  }
+  objc_registerClassPair(sub);
+  return sub;
+}
 
 @implementation DSHWindowButtonInset
 - (void)apply {
   NSWindow* window = self.window;
+  if (!window || self.applying) return;
   NSButton* close = [window standardWindowButton:NSWindowCloseButton];
   NSButton* mini = [window standardWindowButton:NSWindowMiniaturizeButton];
   NSButton* zoom = [window standardWindowButton:NSWindowZoomButton];
   NSView* container = close.superview.superview;
-  if (!window || window.styleMask & NSWindowStyleMaskFullScreen || !close || !mini || !zoom || !container) return;
-  // Match Tao's logical-coordinate inset of the actual standard NSButtons.
+  if (window.styleMask & NSWindowStyleMaskFullScreen || !close || !mini || !zoom || !container) return;
+  Class hooked = dsh_inset_subclass(object_getClass(container));
+  if (hooked && object_getClass(container) != hooked) object_setClass(container, hooked);
+  self.applying = YES;
   NSRect frame = container.frame;
   frame.size.height = close.frame.size.height + self.inset.y;
   frame.origin.y = window.frame.size.height - frame.size.height;
   if (!NSEqualRects(container.frame, frame)) container.frame = frame;
+  // Vertical placement stays with AppKit: it centres the buttons inside the container
+  // height above, so only the horizontal inset is ours to write.
   CGFloat spacing = mini.frame.origin.x - close.frame.origin.x;
   NSButton* buttons[] = { close, mini, zoom };
   for (int i = 0; i < 3; ++i) {
@@ -33,12 +69,9 @@
     origin.x = self.inset.x + i * spacing;
     if (!NSEqualPoints(buttons[i].frame.origin, origin)) [buttons[i] setFrameOrigin:origin];
   }
+  self.applying = NO;
 }
-- (void)layoutChanged:(NSNotification*)notification { [self apply]; }
-- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
 @end
-
-static char buttonInsetKey;
 
 // Stable Node-API ABI; no Electron/V8 headers or renderer access is required.
 extern "C" {
@@ -115,11 +148,10 @@ napi_value configure_style(napi_env env, napi_callback_info info) {
   @try {
     NSButton* buttons[] = { [window standardWindowButton:NSWindowCloseButton],
       [window standardWindowButton:NSWindowMiniaturizeButton], [window standardWindowButton:NSWindowZoomButton] };
-    bool present[3], enabled[3], concealed[3];
+    bool present[3], enabled[3];
     for (int i = 0; i < 3; ++i) {
       present[i] = buttons[i] != nil;
       enabled[i] = buttons[i].enabled;
-      concealed[i] = buttons[i].hidden;
     }
     NSRect frame = window.frame;
     NSWindowStyleMask mask = window.styleMask;
@@ -136,7 +168,7 @@ napi_value configure_style(napi_env env, napi_callback_info info) {
       NSButton* button = [window standardWindowButton:(NSWindowButton)i];
       if (present[i] && button) {
         button.enabled = enabled[i];
-        button.hidden = concealed[i];
+        button.hidden = !decorated;
       }
     }
     [window.contentView layoutSubtreeIfNeeded];
@@ -198,13 +230,39 @@ napi_value set_traffic_light_position(napi_env env, napi_callback_info info) {
       layout = [DSHWindowButtonInset new];
       layout.window = window;
       objc_setAssociatedObject(window, &buttonInsetKey, layout, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-      for (NSNotificationName name in @[NSWindowDidResizeNotification, NSWindowDidUpdateNotification,
-          NSWindowDidExitFullScreenNotification]) {
-        [NSNotificationCenter.defaultCenter addObserver:layout selector:@selector(layoutChanged:) name:name object:window];
-      }
     }
     layout.inset = NSMakePoint(x, y);
     [layout apply];
+    return done(env);
+  } @catch (NSException* exception) { return fail(env, exception.reason.UTF8String); }
+}
+
+// AppKit drags a window only from the live press event, and the renderer
+// reaches this adapter one IPC hop after the click, so remember that press.
+static NSEvent* lastLeftMouseDown;
+
+static void remember_left_mouse_down() {
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown
+                                          handler:^NSEvent*(NSEvent* event) {
+      lastLeftMouseDown = event;
+      return event;
+    }];
+  });
+}
+
+napi_value start_drag(napi_env env, napi_callback_info info) {
+  napi_value args[1];
+  if (!args_for(env, info, 1, args)) return fail(env, "startDrag expects a native window handle");
+  NSWindow* window = window_for_view(env, args[0]);
+  if (!window) return nullptr;
+  NSEvent* event = lastLeftMouseDown;
+  if (!event || event.window != window || (NSEvent.pressedMouseButtons & 1) == 0) {
+    return fail(env, "startDrag needs the left mouse button held on the window");
+  }
+  @try {
+    [window performWindowDragWithEvent:event];
     return done(env);
   } @catch (NSException* exception) { return fail(env, exception.reason.UTF8String); }
 }
@@ -223,9 +281,10 @@ napi_value is_decorated(napi_env env, napi_callback_info info) {
 } // namespace
 
 extern "C" __attribute__((visibility("default"))) napi_value napi_register_module_v1(napi_env env, napi_value exports) {
-  const char* names[] = { "configureStyle", "isDecorated", "setMaximizable", "isMaximizable", "setTrafficLightPosition" };
-  napi_callback callbacks[] = { configure_style, is_decorated, set_maximizable, is_maximizable, set_traffic_light_position };
-  for (int i = 0; i < 5; ++i) {
+  remember_left_mouse_down();
+  const char* names[] = { "configureStyle", "isDecorated", "setMaximizable", "isMaximizable", "setTrafficLightPosition", "startDrag" };
+  napi_callback callbacks[] = { configure_style, is_decorated, set_maximizable, is_maximizable, set_traffic_light_position, start_drag };
+  for (int i = 0; i < 6; ++i) {
     napi_value function = nullptr;
     if (napi_create_function(env, names[i], static_cast<size_t>(-1), callbacks[i], nullptr, &function) != 0
         || napi_set_named_property(env, exports, names[i], function) != 0) return nullptr;

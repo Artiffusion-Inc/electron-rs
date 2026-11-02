@@ -1,5 +1,4 @@
 import path from 'node:path'
-import type { BaseWindowConstructorOptions } from 'electron'
 
 /**
  * appkit.node 的原生适配（骨架）。
@@ -18,6 +17,7 @@ export interface AppKit {
   setMaximizable(handle: Buffer, enabled: boolean): void
   isMaximizable(handle: Buffer): boolean
   setTrafficLightPosition(handle: Buffer, x: number, y: number): void
+  startDrag(handle: Buffer): void
 }
 
 let loaded: AppKit | undefined
@@ -28,27 +28,4 @@ let loaded: AppKit | undefined
  */
 export function appkit(): AppKit {
   return loaded ??= require(path.join(__dirname, '../../appkit.node')) as AppKit
-}
-
-export interface TitleBarConfig {
-  titleBarStyle?: string
-  titleBarHidden?: boolean
-  hiddenTitle?: boolean
-}
-
-/**
- * Tauri 的 titleBarStyle → Electron 的构造参数。
- *
- * macOS 一律返回 'default'：Electron 在构造时就固定了 has_frame，
- * 之后再让 AppKit 套 Tauri 的样式；若这里返回 hidden，Electron 会接管
- * 无边框按钮代理，和 AppKit 的结果互相打架。
- */
-export function titleBarStyle(
-  platform: NodeJS.Platform,
-  config: TitleBarConfig,
-): BaseWindowConstructorOptions['titleBarStyle'] {
-  if (platform === 'darwin') return 'default'
-  const style = String(config.titleBarStyle ?? 'visible').toLowerCase()
-  if (config.hiddenTitle || config.titleBarHidden || style === 'transparent') return 'hidden'
-  return style === 'overlay' ? 'hiddenInset' : 'default'
 }

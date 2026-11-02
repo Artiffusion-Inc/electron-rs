@@ -132,8 +132,9 @@ fn navigation_pauses_native_requests_and_cleans_up_every_decision_path() {
 fn generated_preloads_scope_initialization_and_ipc_to_the_right_frames() {
   let observed = observations("preload");
   assert_eq!(
-    observed["trafficLightPosition"],
-    json!({ "x": 12, "y": 18 })
+    observed["electronTrafficLight"],
+    Value::Null,
+    "macOS caption insets stay AppKit-owned, Electron must not receive trafficLightPosition"
   );
   assert_eq!(observed["tabbingIdentifier"], "editor-tabs");
   assert_eq!(observed["plainPreload"], true);

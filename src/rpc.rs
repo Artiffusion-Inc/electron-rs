@@ -421,6 +421,7 @@ pub mod window {
     DisplayForPoint { x: f64, y: f64 } => Option<Display>, "window.displayForPoint";
     SetTitleBarStyle { window_id: u32, style: TitleBarStyle } => (), "window.titleBarStyle", deferred = true;
     SetTrafficLight { window_id: u32, x: f64, y: f64, physical: bool } => (), "window.trafficLight";
+    StartDrag { window_id: u32 } => (), "window.startDrag";
   }
 }
 

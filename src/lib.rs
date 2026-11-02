@@ -385,7 +385,7 @@ fn compile_native_assets(dir: &Path, target: &DistributionTarget) -> Result<(), 
   }
   let arch = if target.arch == "arm64" { "arm64" } else { "x86_64" };
   let output = ProcessCommand::new("clang++")
-    .args(["-std=c++17", "-fobjc-arc", "-bundle", "-undefined", "dynamic_lookup", "-framework", "AppKit", "-arch", arch, "-mmacosx-version-min=12.0"])
+    .args(["-std=c++17", "-fobjc-arc", "-fblocks", "-bundle", "-undefined", "dynamic_lookup", "-framework", "AppKit", "-arch", arch, "-mmacosx-version-min=12.0"])
     .arg(dir.join("appkit.mm")).arg("-o").arg(&binary)
     .output().map_err(|error| Error::with_source("start AppKit bridge compiler", error))?;
   if !output.status.success() {

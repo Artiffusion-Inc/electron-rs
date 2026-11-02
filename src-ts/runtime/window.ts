@@ -81,7 +81,7 @@ export class Window extends EventEmitter<WindowEvents> {
 
   initialize(): void {
     this.native.once('closed', () => this.dispose())
-    if (this.env.platform === 'darwin') this.configureStyle()
+    if (this.env.platform === 'darwin' && this.config.trafficLightPosition) this.setTrafficLight(this.config.trafficLightPosition)
     if (this.env.platform === 'linux') this.setBackgroundColor(this.config.backgroundColor)
     if (this.env.platform === 'linux' && this.config.focusable === false) this.native.setFocusable(false)
     this.native.on('resize', this.onMetricsChanged)
@@ -271,6 +271,9 @@ export class Window extends EventEmitter<WindowEvents> {
       this.env.appKit().setTrafficLightPosition(this.native.getNativeWindowHandle(), x, y)
       this.config = { ...this.config, trafficLightPosition: { x, y } }
     }
+  }
+  startDragging(): void {
+    this.env.appKit().startDrag(this.native.getNativeWindowHandle())
   }
   setBackgroundColor(color: string | number[] | undefined): void {
     const transparent = this.config.transparent === true
