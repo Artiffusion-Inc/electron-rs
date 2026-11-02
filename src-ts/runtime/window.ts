@@ -82,8 +82,11 @@ export class Window extends EventEmitter<WindowEvents> {
   initialize(): void {
     this.native.once('closed', () => this.dispose())
     if (this.env.platform === 'darwin') {
-      this.applyMaximizable()
-      if (this.config.trafficLightPosition) this.setTrafficLight(this.config.trafficLightPosition)
+      if (this.config.hiddenTitle === true || this.config.titleBarHidden === true) this.configureStyle()
+      else {
+        this.applyMaximizable()
+        if (this.config.trafficLightPosition) this.setTrafficLight(this.config.trafficLightPosition)
+      }
     }
     if (this.env.platform === 'linux') this.setBackgroundColor(this.config.backgroundColor)
     if (this.env.platform === 'linux' && this.config.focusable === false) this.native.setFocusable(false)

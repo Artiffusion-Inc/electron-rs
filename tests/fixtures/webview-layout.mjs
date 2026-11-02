@@ -1304,6 +1304,9 @@ switch (process.argv[2]) {
     const darwinStyles = [inspect('state.windows.get(65)'), inspect('state.windows.get(66)')]
     assert.deepEqual(darwinStyles.map(w => w.options.titleBarStyle), ['default', 'hiddenInset'],
       'macOS Transparent keeps the native caption inset and Overlay extends under it')
+    await call('window.create', { windowId: 67, window: { hiddenTitle: true } })
+    assert.equal(inspect('state.windows.get(67)').appkitStyle?.hidden, true,
+      'macOS builder must forward hiddenTitle to the native caption')
     const builder = host.getBounds()
     host.frame = { width: 20, height: 40 }
     host.setBounds({ x: 2000, y: 50, width: 480, height: 340 })
