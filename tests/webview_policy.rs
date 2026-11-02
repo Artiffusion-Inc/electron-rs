@@ -40,7 +40,8 @@ fn navigation_pauses_native_requests_and_cleans_up_every_decision_path() {
   for owner in ["child", "iframe"] {
     assert_eq!(
       observed["denied"][owner]["replies"],
-      json!([{ "cancel": true }])
+      json!([{ "cancel": false }]),
+      "cross-origin subframes are never blocked"
     );
     assert_eq!(observed["denied"][owner]["stopsAtReply"], json!([0]));
   }
@@ -53,7 +54,7 @@ fn navigation_pauses_native_requests_and_cleans_up_every_decision_path() {
   assert_eq!(observed["decided"]["main"]["stopsAtReply"], json!([0]));
   assert_eq!(
     observed["decided"]["child"]["replies"],
-    json!([{ "cancel": true }])
+    json!([{ "cancel": false }])
   );
   assert_eq!(observed["decided"]["cleanup"], clean);
 
@@ -79,6 +80,15 @@ fn navigation_pauses_native_requests_and_cleans_up_every_decision_path() {
     );
   }
   assert_eq!(observed["rejected"]["stopError"], "stop failed");
+  let cross = observed["crossOrigin"].as_array().unwrap();
+  assert_eq!(cross.len(), 2);
+  assert_eq!(cross[0]["resourceType"], "mainFrame");
+  assert!(cross[0]["request"].is_null());
+  assert_eq!(cross[0]["replies"], json!([{ "cancel": true }]));
+  assert_eq!(cross[1]["resourceType"], "subFrame");
+  assert_eq!(cross[1]["request"]["webviewId"], 50);
+  assert_eq!(cross[1]["request"]["url"], "https://cross.invalid/frame");
+  assert_eq!(cross[1]["replies"], json!([{ "cancel": false }]));
   assert_eq!(observed["rejected"]["cleanup"], clean);
 
   let lifecycle = observed["lifecycle"].as_array().unwrap();
