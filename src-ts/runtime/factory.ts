@@ -200,7 +200,9 @@ export class Factory implements WindowFactory {
       closable: config.closable ?? true, focusable: process.platform === 'linux' ? true : config.focusable ?? true,
       alwaysOnTop: config.alwaysOnTop ?? false, skipTaskbar: config.skipTaskbar ?? false,
       hasShadow: config.shadow ?? true, autoHideMenuBar: true,
-      titleBarStyle: config.hiddenTitle || config.titleBarHidden || style === 'transparent' ? 'hidden' : style === 'overlay' ? 'hiddenInset' : 'default',
+      titleBarStyle: process.platform === 'darwin'
+        ? style === 'overlay' ? 'hiddenInset' : 'default'
+        : config.hiddenTitle || config.titleBarHidden || style === 'transparent' ? 'hidden' : style === 'overlay' ? 'hiddenInset' : 'default',
       acceptFirstMouse: pageConfig.acceptFirstMouse === true,
       ...(config.titleBarOverlay ? { titleBarOverlay: true } : {}),
       ...(typeof config.tabbingIdentifier === 'string' ? { tabbingIdentifier: config.tabbingIdentifier } : {}),

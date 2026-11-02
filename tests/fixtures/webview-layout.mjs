@@ -1298,6 +1298,12 @@ switch (process.argv[2]) {
     await call('window.create', { windowId: 64, window: { width: 320, height: 200, maximizable: false } })
     const unmaximizable = inspect('state.windows.get(64)')
     assert.equal(unmaximizable.nativeMaximizable, false, 'macOS builder must forward maximizable before the window is shown')
+    for (const [index, config] of [{ titleBarStyle: 'Transparent' }, { titleBarStyle: 'Overlay' }].entries()) {
+      await call('window.create', { windowId: 65 + index, window: config })
+    }
+    const darwinStyles = [inspect('state.windows.get(65)'), inspect('state.windows.get(66)')]
+    assert.deepEqual(darwinStyles.map(w => w.options.titleBarStyle), ['default', 'hiddenInset'],
+      'macOS Transparent keeps the native caption inset and Overlay extends under it')
     const builder = host.getBounds()
     host.frame = { width: 20, height: 40 }
     host.setBounds({ x: 2000, y: 50, width: 480, height: 340 })
