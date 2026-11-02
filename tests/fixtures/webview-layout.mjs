@@ -225,7 +225,10 @@ const appkit = {
     const window = this.window(handle)
     window.appkitStyle = { decorated, style, hidden }
   },
-  isDecorated(handle) { return this.window(handle).appkitStyle?.decorated ?? true },
+  isDecorated(handle) {
+    const window = this.window(handle)
+    return window.appkitStyle?.decorated ?? window.options.frame !== false
+  },
   setMaximizable(handle, enabled) { this.window(handle).nativeMaximizable = enabled },
   isMaximizable(handle) { return this.window(handle).nativeMaximizable !== false },
   setTrafficLightPosition(handle, x, y) { (this.window(handle).nativeInsets ??= []).push({ x, y }) },
@@ -1319,11 +1322,19 @@ switch (process.argv[2]) {
     assert.equal(host.nativeMaximizable, true)
     await call('window.startDrag', { windowId: 63 })
     assert.deepEqual(host.nativeDrags, ['1'], 'macOS drag goes to the native press handler, not Electron')
+    const decoratedBefore = (await call('window.geometry', { windowId: 63 })).decorated
+    await call('window.decorations', { windowId: 63, value: false })
+    const decoratedOff = (await call('window.geometry', { windowId: 63 })).decorated
+    await call('window.decorations', { windowId: 63, value: true })
+    const decoratedOn = (await call('window.geometry', { windowId: 63 })).decorated
+    assert.deepEqual([decoratedBefore, decoratedOff, decoratedOn], [true, false, true],
+      'macOS decorations getter must follow the native caption state')
     context.process.platform = 'linux'
     let nativeCenters = 0
     host.center = () => { nativeCenters++ }
     await call('window.center', { windowId: 63 })
     result = { builder, centered, focus, nativeCenters, nativeDrags: host.nativeDrags,
+      decorations: [decoratedBefore, decoratedOff, decoratedOn],
       fullscreen: host.options.fullscreen, fullscreenable: host.options.fullscreenable, trafficLights: initialTrafficLights }
     break
   }
