@@ -174,6 +174,9 @@ export class Webview extends EventEmitter<WebviewEvents> {
       this.scaleTo(parent)
       return
     }
+    this.applyBounds(bounds, parent)
+  }
+  private applyBounds(bounds: Rectangle, parent: Rectangle): void {
     this.view!.setBounds(bounds)
     this.reference = { bounds: { ...bounds }, parent }
   }
@@ -255,7 +258,7 @@ export class Webview extends EventEmitter<WebviewEvents> {
     try {
       destination.native.contentView.addChildView(this.view!)
       this.owner = destination
-      this.setNativeBounds(bounds)
+      this.applyBounds(bounds, destination.native.getContentBounds())
     } catch (error) {
       this.owner = previousOwner
       destination.native.contentView.removeChildView(this.view!)
