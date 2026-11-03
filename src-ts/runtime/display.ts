@@ -50,11 +50,17 @@ export function displayAtPoint(source: DisplaySource, x: number, y: number): Dis
   return display ? readDisplay(source, display) : null
 }
 
-export function displayForBounds(source: DisplaySource, bounds: Rectangle): DisplayInfo {
-  return readDisplay(source, source.screen.getDisplayMatching(bounds))
+export function displayForScale(source: DisplaySource, scaleFactor: number | undefined): Display | undefined {
+  if (typeof scaleFactor !== 'number' || !Number.isFinite(scaleFactor) || scaleFactor <= 0) return undefined
+  const matches = source.screen.getAllDisplays().filter((display) => Math.abs(display.scaleFactor - scaleFactor) < 0.001)
+  return matches.length === 1 ? matches[0] : undefined
 }
 
-export function centeredPosition(source: DisplaySource, bounds: Rectangle): CursorPoint {
-  const workArea = source.screen.getDisplayMatching(bounds).workArea
+export function displayForBounds(source: DisplaySource, bounds: Rectangle, scaleFactor?: number): DisplayInfo {
+  return readDisplay(source, displayForScale(source, scaleFactor) ?? source.screen.getDisplayMatching(bounds))
+}
+
+export function centeredPosition(source: DisplaySource, bounds: Rectangle, scaleFactor?: number): CursorPoint {
+  const workArea = (displayForScale(source, scaleFactor) ?? source.screen.getDisplayMatching(bounds)).workArea
   return { x: Math.round(workArea.x + (workArea.width - bounds.width) / 2), y: Math.round(workArea.y + (workArea.height - bounds.height) / 2) }
 }

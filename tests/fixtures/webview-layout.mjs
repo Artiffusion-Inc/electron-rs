@@ -862,6 +862,30 @@ switch (process.argv[2]) {
     }
     break
   }
+  case 'display-scale': {
+    // issue #1360: Electron reports x/y 0 for a BaseWindow on Wayland, so
+    // getDisplayMatching(bounds) always answers with the primary display.
+    // Everything that needs the window's display must go by the renderer's DPR.
+    screen.getDisplayMatching = () => displays[0]
+    const host = await createHost(true, { x: 2000, y: 50 })
+    const main = mainContentsOf(host)
+    main.devicePixelRatio = 2
+    main.emit('dom-ready')
+    await settle()
+    host.setBounds({ x: 2000, y: 50, width: 480, height: 340 })
+    const geometry = await call('window.geometry', { windowId: 2 })
+    const current = await call('window.currentDisplay', { windowId: 2 })
+    await call('window.center', { windowId: 2 })
+    const centered = host.getContentBounds()
+    assert.notEqual(geometry.scaleFactor, screen.getDisplayMatching(host.getBounds()).scaleFactor,
+      'the fixture must disagree between the renderer DPR and the bounds-matched display')
+    assert.equal(geometry.scaleFactor, 2, 'window scale follows the main renderer DPR')
+    assert.equal(current.name, 'secondary', 'the current display must match the DPR, not the bounds')
+    assert.deepEqual(centered, { x: 2320, y: 170, width: 480, height: 340 },
+      'centering uses the DPR-matched work area')
+    result = { scale: geometry.scaleFactor, display: current.name, centered }
+    break
+  }
   case 'minimized-constraints': {
     for (const [index, frame] of [{ width: 0, height: 0 }, { width: 16, height: 38 }].entries()) {
       const windowId = 41 + index
