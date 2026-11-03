@@ -314,7 +314,7 @@ fn fingerprint(metadata: &Metadata, target: &DistributionTarget, pe: bool) -> Re
   target.arch.hash(&mut hasher);
   metadata.app_name.hash(&mut hasher);
   metadata.identifier.hash(&mut hasher);
-  if pe && target.platform == "darwin" { include_bytes!("../assets/launcher.cjs").hash(&mut hasher); }
+  if pe && target.platform == "darwin" { include_bytes!("launcher.mjs").hash(&mut hasher); }
   for (tag, path) in [(b"icon".as_slice(), metadata.icon.as_deref()), (b"host".as_slice(), metadata.host_executable.as_deref())] {
     tag.hash(&mut hasher);
     if pe {
@@ -342,8 +342,8 @@ fn hash_file(path: &Path, hasher: &mut DefaultHasher) -> Result<(), Error> {
 fn patch_plist(app: &Path, metadata: &Metadata) -> Result<(), Error> {
   let launcher = app.join("Contents/Resources/app");
   fs::create_dir_all(&launcher)?;
-  fs::write(launcher.join("package.json"), r#"{"main":"index.cjs"}"#)?;
-  fs::write(launcher.join("index.cjs"), include_bytes!("../assets/launcher.cjs"))?;
+  fs::write(launcher.join("package.json"), r#"{"main":"index.mjs","type":"module"}"#)?;
+  fs::write(launcher.join("index.mjs"), include_bytes!("launcher.mjs"))?;
   let plist = app.join("Contents/Info.plist");
   if !plist.is_file() { return Err(format!("missing macOS Info.plist: {}", plist.display()).into()); }
   if let Some(name) = metadata.app_name.as_deref() {

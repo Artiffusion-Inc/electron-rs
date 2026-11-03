@@ -5,10 +5,7 @@ import { spawnSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 
 if (process.argv.slice(1).some(value => !value.startsWith('-psn_'))) {
-  import(pathToFileURL(join(process.resourcesPath, 'default_app.asar', 'main.js')).href).catch(error => {
-    console.error('ELECTRON_ENTRY_FAILED:', error)
-    app.exit(1)
-  })
+  await import(pathToFileURL(join(process.resourcesPath, 'default_app.asar', 'main.js')).href)
 } else {
   app.dock?.hide()
   let host = dirname(dirname(dirname(process.resourcesPath)))
