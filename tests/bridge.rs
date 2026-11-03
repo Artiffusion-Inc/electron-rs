@@ -828,7 +828,9 @@ fn cold_launch_returns_to_host(binary: &Path) {
   let host = stage_root().join("Launch Host.app");
   let contents = host.join("Contents");
   fs::create_dir_all(contents.join("MacOS")).unwrap();
-  fs::write(contents.join("Info.plist"), r#"<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleExecutable</key><string>probe</string><key>CFBundleIdentifier</key><string>org.tauri.launcher-probe</string><key>CFBundlePackageType</key><string>APPL</string><key>LSUIElement</key><true/></dict></plist>"#).unwrap();
+  let identity: Value = serde_json::from_slice(&fs::read(distribution().join("electron-rs.json")).unwrap()).unwrap();
+  let identifier = identity["identifier"].as_str().unwrap();
+  fs::write(contents.join("Info.plist"), format!(r#"<?xml version="1.0"?><plist version="1.0"><dict><key>CFBundleExecutable</key><string>probe</string><key>CFBundleIdentifier</key><string>{identifier}</string><key>CFBundlePackageType</key><string>APPL</string><key>LSUIElement</key><true/></dict></plist>"#)).unwrap();
   let probe = stage_root().join("launcher-probe.m");
   fs::write(&probe, r#"#import <Foundation/Foundation.h>
 int main(void) { @autoreleasepool {
@@ -847,7 +849,9 @@ int main(void) { @autoreleasepool {
   let verified = Command::new("codesign").args(["--verify", "--deep", "--strict"]).arg(&host).output().unwrap();
   assert!(verified.status.success(), "{:?}", verified);
   let executable = nested.join(binary.strip_prefix(distribution()).unwrap());
-  let mut launcher = Worker(Command::new(&executable).env_remove("ELECTRON_RUN_AS_NODE").spawn().unwrap());
+  let bundle = executable.parent().unwrap().parent().unwrap().parent().unwrap();
+  let mut launcher = Worker(Command::new("/usr/bin/open").args(["-n", "-W"]).arg(bundle)
+    .env_remove("ELECTRON_RUN_AS_NODE").spawn().unwrap());
   let deadline = Instant::now() + WAIT;
   let status = loop {
     if let Some(status) = launcher.0.try_wait().unwrap() { break status; }
