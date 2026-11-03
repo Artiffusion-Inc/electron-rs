@@ -425,6 +425,13 @@ pub mod window {
     SetTitleBarStyle { window_id: u32, style: TitleBarStyle } => (), "window.titleBarStyle", deferred = true;
     SetTrafficLight { window_id: u32, x: f64, y: f64, physical: bool } => (), "window.trafficLight";
     StartDrag { window_id: u32 } => (), "window.startDrag";
+    /// Show a menu at the cursor as a native context menu. Resolves once the user
+    /// dismisses it, so the caller must hold the menu for the whole session.
+    PopupMenu {
+      window_id: u32, menu: Vec<MenuItem>,
+      #[serde(skip_serializing_if = "Option::is_none")] x: Option<f64>,
+      #[serde(skip_serializing_if = "Option::is_none")] y: Option<f64>,
+    } => (), "window.popupMenu", deferred = true, timeout = 300;
   }
 }
 

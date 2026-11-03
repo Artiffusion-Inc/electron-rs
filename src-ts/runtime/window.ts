@@ -83,6 +83,7 @@ export class Window extends EventEmitter<WindowEvents> {
   private theme: Theme = null
   private themeQueue: Promise<unknown> = Promise.resolve()
   private appliedConstraints?: string
+  private menu?: Menu
   private allowClose = false
   private unsubscribeTheme?: () => void
   private mainScaleContents?: WebContents
@@ -351,6 +352,26 @@ export class Window extends EventEmitter<WindowEvents> {
       this.env.appKit().setTrafficLightPosition(this.native.getNativeWindowHandle(), x, y)
       this.config = { ...this.config, trafficLightPosition: { x, y } }
     }
+  }
+  /**
+   * Pop a native context menu at the cursor (or the given window-relative point).
+   * Resolves only after the menu closes: the promise keeps the Menu and its
+   * command closure alive for as long as the native popup is tracking.
+   */
+  popupMenu(items: WindowMenuItem[], position?: { x?: number; y?: number }): Promise<null> {
+    return new Promise((resolve, reject) => {
+      let menu: Menu | undefined
+      try {
+        menu = Menu.buildFromTemplate(menuTemplate(items, id => { if (!this.destroyed) this.emit('menuCommand', id) }))
+      } catch (error) { reject(error as Error); return }
+      const done = () => { this.menu = this.menu === menu ? undefined : this.menu; menu = undefined; resolve(null) }
+      this.menu?.closePopup()
+      this.menu = menu
+      const at = position?.x !== undefined && position.y !== undefined
+        ? { x: Math.round(position.x), y: Math.round(position.y) }
+        : undefined
+      try { menu.popup({ window: this.native, ...(at ?? {}), callback: () => done() }) } catch (error) { done(); reject(error as Error) }
+    })
   }
   startDragging(): void {
     this.env.appKit().startDrag(this.native.getNativeWindowHandle())

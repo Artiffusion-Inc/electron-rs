@@ -124,6 +124,7 @@ function windowCommands(ctx: CommandContext): CommandTable {
     'window.titleBarStyle': (p) => { window(p).setTitleBarStyle(p.style); return null },
     'window.trafficLight': (p) => { window(p).setTrafficLight(p); return null },
     'window.startDrag': (p) => { window(p).startDragging(); return null },
+    'window.popupMenu': (p) => window(p).popupMenu(p.menu, p.x !== undefined && p.y !== undefined ? { x: p.x, y: p.y } : undefined),
   }
 }
 
