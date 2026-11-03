@@ -171,6 +171,30 @@ fn partial_mixed_unit_bounds_validate_and_reset_resize_proportions() {
 }
 
 #[test]
+fn stale_child_bounds_after_parent_resize_scale_instead_of_pinning_old_geometry() {
+    let observed: Value = serde_json::from_str(&support::node(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/webview-layout.mjs"),
+        &["stale-bounds"],
+    ))
+    .unwrap();
+
+    assert_eq!(
+        observed["initial"],
+        json!({ "x": 0, "y": 44, "width": 1280, "height": 796 })
+    );
+    assert_eq!(observed["afterParentResize"], observed["initial"]);
+    assert_eq!(
+        observed["afterStaleWrite"],
+        json!({ "x": 0, "y": 58, "width": 1850, "height": 1048 })
+    );
+    assert_eq!(observed["afterRepeatedStaleWrite"], observed["afterStaleWrite"]);
+    assert_eq!(
+        observed["afterFreshWrite"],
+        json!({ "x": 0, "y": 44, "width": 1850, "height": 1009 })
+    );
+}
+
+#[test]
 fn child_dispatch_and_close_never_target_the_unloaded_host() {
     let observed: Value = serde_json::from_str(&support::node(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/webview-layout.mjs"),
