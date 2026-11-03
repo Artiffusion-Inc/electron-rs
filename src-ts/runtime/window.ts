@@ -1,8 +1,8 @@
 import { EventEmitter } from 'node:events'
 import os from 'node:os'
 import { Menu, nativeImage } from 'electron'
-import type { App, BaseWindow, BrowserWindow, MenuItemConstructorOptions, NativeImage, NativeTheme, Rectangle, WebContents } from 'electron'
-import { displayForBounds, findDisplay, type DisplayInfo, type DisplaySource } from './display'
+import type { App, BaseWindow, BrowserWindow, Display, MenuItemConstructorOptions, NativeImage, NativeTheme, Rectangle, WebContents } from 'electron'
+import { displayForBounds, displayForScale, findDisplay, type DisplayInfo, type DisplaySource } from './display'
 import { readContentsTheme } from './native/theme'
 import type { AppKit } from './native/appkit'
 
@@ -129,7 +129,7 @@ export class Window extends EventEmitter<WindowEvents> {
     if (this.config.visibleOnAllWorkspaces) this.setVisibleOnAllWorkspaces(true)
     if (this.config.contentProtected) this.setContentProtection(true)
     if (this.config.preventOverflow) {
-      const bounds = this.native.getBounds(), area = this.env.screen.getDisplayMatching(bounds).workArea
+      const bounds = this.native.getBounds(), area = this.display().workArea
       const margin = typeof this.config.preventOverflow === 'object' ? this.config.preventOverflow : {}
       const width = Math.max(1, Math.min(bounds.width, area.width - (margin.width ?? 0)))
       const height = Math.max(1, Math.min(bounds.height, area.height - (margin.height ?? 0)))
@@ -175,7 +175,10 @@ export class Window extends EventEmitter<WindowEvents> {
   }
 
   get scale(): number { return this.scaleCache ?? this.displayScale() }
-  private displayScale(): number { return this.env.screen.getDisplayMatching(this.native.getBounds()).scaleFactor || 1 }
+  private display(): Display {
+    return displayForScale(this.env, this.scaleCache) ?? this.env.screen.getDisplayMatching(this.native.getBounds())
+  }
+  private displayScale(): number { return this.display().scaleFactor || 1 }
   private refreshScale(): void { void this.probeScale().catch(() => {}) }
   private async probeScale(): Promise<void> {
     if (this.scaleProbing) { this.scaleDirty = true; return }
@@ -285,10 +288,10 @@ export class Window extends EventEmitter<WindowEvents> {
   }
   center(): void {
     if (this.env.platform === 'linux') { this.native.center?.(); return }
-    const bounds = this.native.getBounds(), area = this.env.screen.getDisplayMatching(bounds).workArea
+    const bounds = this.native.getBounds(), area = this.display().workArea
     this.native.setPosition(Math.round(area.x + (area.width - bounds.width) / 2), Math.round(area.y + (area.height - bounds.height) / 2))
   }
-  currentDisplay(): DisplayInfo { return displayForBounds(this.env, this.native.getBounds()) }
+  currentDisplay(): DisplayInfo { return displayForBounds(this.env, this.native.getBounds(), this.scaleCache) }
 
   setTitle(title: string): void { this.native.setTitle(title) }
   setResizable(value: boolean): void { this.native.setResizable(value); this.applyMaximizable() }
