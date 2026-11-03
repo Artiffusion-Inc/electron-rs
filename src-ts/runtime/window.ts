@@ -358,19 +358,21 @@ export class Window extends EventEmitter<WindowEvents> {
    * Resolves only after the menu closes: the promise keeps the Menu and its
    * command closure alive for as long as the native popup is tracking.
    */
-  popupMenu(items: WindowMenuItem[], position?: { x?: number; y?: number }): Promise<null> {
+  popupMenu(items: WindowMenuItem[], position?: { x?: number; y?: number }): Promise<number | null> {
     return new Promise((resolve, reject) => {
       let menu: Menu | undefined
+      let chosen: number | null = null
       try {
-        menu = Menu.buildFromTemplate(menuTemplate(items, id => { if (!this.destroyed) this.emit('menuCommand', id) }))
+        menu = Menu.buildFromTemplate(menuTemplate(items, id => { chosen = id }))
       } catch (error) { reject(error as Error); return }
-      const done = () => { this.menu = this.menu === menu ? undefined : this.menu; menu = undefined; resolve(null) }
+      const opened = menu
+      const done = () => { if (this.menu === opened) this.menu = undefined; menu = undefined; resolve(chosen) }
       this.menu?.closePopup()
-      this.menu = menu
+      this.menu = opened
       const at = position?.x !== undefined && position.y !== undefined
         ? { x: Math.round(position.x), y: Math.round(position.y) }
         : undefined
-      try { menu.popup({ window: this.native, ...(at ?? {}), callback: () => done() }) } catch (error) { done(); reject(error as Error) }
+      try { opened.popup({ window: this.native, ...(at ?? {}), callback: () => done() }) } catch (error) { done(); reject(error as Error) }
     })
   }
   startDragging(): void {

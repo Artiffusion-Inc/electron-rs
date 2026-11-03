@@ -431,7 +431,7 @@ pub mod window {
       window_id: u32, menu: Vec<MenuItem>,
       #[serde(skip_serializing_if = "Option::is_none")] x: Option<f64>,
       #[serde(skip_serializing_if = "Option::is_none")] y: Option<f64>,
-    } => (), "window.popupMenu", deferred = true, timeout = 300;
+    } => Option<u32>, "window.popupMenu", deferred = true, timeout = 300;
   }
 }
 
