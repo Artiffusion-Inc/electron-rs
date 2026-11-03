@@ -1,13 +1,13 @@
 use std::{
-  collections::HashMap,
+  collections::{HashMap, VecDeque},
   io::{self, BufRead, BufReader, Write},
   net::{Shutdown, TcpListener, TcpStream},
   path::{Path, PathBuf},
-  process::{Child, Command, Stdio},
+  process::{Child, ChildStderr, Command, Stdio},
   sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc::{self, Receiver, SyncSender, TrySendError},
-    Arc, Mutex,
+    Arc, Condvar, Mutex,
   },
   time::{Duration, Instant},
 };
@@ -19,6 +19,9 @@ use tokio::sync::oneshot;
 use crate::{command::CommandRoute, Error};
 
 const EVENT_CAPACITY: usize = 1024;
+const STDERR_TAIL_LINES: usize = 32;
+const STDERR_TAIL_LINE_CHARS: usize = 400;
+const STDERR_TAIL_SETTLE: Duration = Duration::from_millis(250);
 
 /// An unsolicited notification from Electron.
 pub type Event = Value;
@@ -159,6 +162,7 @@ impl Electron {
     let mut command = Command::new(&binary);
     command
       .stdin(Stdio::piped())
+      .stderr(Stdio::piped())
       .arg(script)
       .arg("--port")
       .arg(port.to_string())
@@ -198,6 +202,7 @@ impl Electron {
     let mut child = command
       .spawn()
       .map_err(|error| Error::with_source(format!("spawn {}", binary.display()), error))?;
+    let stderr_tail = child.stderr.take().map(StderrTail::start);
     #[cfg(windows)]
     let mut job = None;
     let startup = (|| {
@@ -251,6 +256,10 @@ impl Electron {
       Err(error) => {
         let _ = child.kill();
         let _ = child.wait();
+        let error = attach_stderr_tail(error, stderr_tail.as_ref());
+        if let Some(mut tail) = stderr_tail {
+          tail.stop();
+        }
         return Err(error);
       }
     };
@@ -604,6 +613,146 @@ impl Drop for Electron {
   fn drop(&mut self) {
     self.shutdown();
   }
+}
+
+struct StderrTailState {
+  lines: VecDeque<String>,
+  done: bool,
+}
+
+type StderrTailShared = Arc<(Mutex<StderrTailState>, Condvar)>;
+
+struct StderrTail {
+  state: StderrTailShared,
+  reader: Option<std::thread::JoinHandle<()>>,
+}
+
+fn pump_stderr<R: BufRead>(shared: &StderrTailShared, reader: &mut R, echo: bool) {
+  let mut line = String::new();
+  while reader.read_line(&mut line).is_ok_and(|size| size > 0) {
+    if echo {
+      eprint!("{line}");
+    }
+    let trimmed = line.trim_end_matches(['\r', '\n']);
+    let mut text: String = trimmed.chars().take(STDERR_TAIL_LINE_CHARS).collect();
+    if trimmed.chars().count() > STDERR_TAIL_LINE_CHARS {
+      text.push('…');
+    }
+    let mut tail = shared.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if tail.lines.len() >= STDERR_TAIL_LINES {
+      tail.lines.pop_front();
+    }
+    tail.lines.push_back(text);
+    drop(tail);
+    line.clear();
+  }
+  shared
+    .0
+    .lock()
+    .unwrap_or_else(|poisoned| poisoned.into_inner())
+    .done = true;
+  shared.1.notify_all();
+}
+
+impl StderrTail {
+  fn start(stderr: ChildStderr) -> Self {
+    let state = Arc::new((
+      Mutex::new(StderrTailState { lines: VecDeque::new(), done: false }),
+      Condvar::new(),
+    ));
+    let shared = Arc::clone(&state);
+    let reader = std::thread::Builder::new()
+      .name("electron-stderr".into())
+      .spawn(move || pump_stderr(&shared, &mut BufReader::new(stderr), true))
+      .ok();
+    if reader.is_none() {
+      state
+        .0
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .done = true;
+    }
+    Self { state, reader }
+  }
+
+  fn lines(&self, wait: Duration) -> Vec<String> {
+    let mut tail = self
+      .state
+      .0
+      .lock()
+      .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let deadline = Instant::now() + wait;
+    while !tail.done {
+      let remaining = deadline.saturating_duration_since(Instant::now());
+      if remaining.is_zero() {
+        break;
+      }
+      let (next, timed_out) = self
+        .state
+        .1
+        .wait_timeout(tail, remaining)
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+      tail = next;
+      if timed_out.timed_out() {
+        break;
+      }
+    }
+    tail.lines.iter().cloned().collect()
+  }
+
+  fn stop(&mut self) {
+    let Some(reader) = self.reader.take() else {
+      return;
+    };
+    let mut tail = self
+      .state
+      .0
+      .lock()
+      .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let deadline = Instant::now() + STDERR_TAIL_SETTLE;
+    while !tail.done {
+      let remaining = deadline.saturating_duration_since(Instant::now());
+      if remaining.is_zero() {
+        break;
+      }
+      let (next, timed_out) = self
+        .state
+        .1
+        .wait_timeout(tail, remaining)
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+      tail = next;
+      if timed_out.timed_out() {
+        break;
+      }
+    }
+    let done = tail.done;
+    drop(tail);
+    if done {
+      let _ = reader.join();
+    }
+  }
+}
+
+fn attach_stderr_tail(error: Error, tail: Option<&StderrTail>) -> Error {
+  let Some(tail) = tail else {
+    return error;
+  };
+  let lines = tail.lines(STDERR_TAIL_SETTLE);
+  if lines.is_empty() {
+    return error;
+  }
+  let Error::InvalidInput(mut message) = error else {
+    return error;
+  };
+  message.push_str(&format!(
+    "\nELECTRON_STDERR_TAIL: last {} Electron stderr line(s):",
+    lines.len()
+  ));
+  for line in lines {
+    message.push_str("\n  ");
+    message.push_str(&line);
+  }
+  Error::InvalidInput(message)
 }
 
 #[cfg(windows)]
@@ -1427,6 +1576,71 @@ mod tests {
     assert_eq!(token.len(), 64);
     assert!(token.bytes().all(|byte| byte.is_ascii_hexdigit()));
     assert_ne!(token, handshake_token().unwrap());
+  }
+
+  fn stderr_tail_state() -> StderrTailShared {
+    Arc::new((
+      Mutex::new(StderrTailState { lines: VecDeque::new(), done: false }),
+      Condvar::new(),
+    ))
+  }
+
+  #[test]
+  fn stderr_tail_keeps_only_the_last_lines_and_marks_completion() {
+    let shared = stderr_tail_state();
+    let mut input = String::new();
+    for index in 0..STDERR_TAIL_LINES + 8 {
+      input.push_str(&format!("line-{index}\r\n"));
+    }
+    pump_stderr(&shared, &mut BufReader::new(input.as_bytes()), false);
+    let tail = shared.0.lock().unwrap();
+    assert!(tail.done);
+    assert_eq!(tail.lines.len(), STDERR_TAIL_LINES);
+    assert_eq!(tail.lines.front().unwrap(), &format!("line-{}", 8));
+    assert_eq!(
+      tail.lines.back().unwrap(),
+      &format!("line-{}", STDERR_TAIL_LINES + 7)
+    );
+  }
+
+  #[test]
+  fn stderr_tail_truncates_long_lines_and_reports_them_on_failure() {
+    let shared = stderr_tail_state();
+    let long = "x".repeat(STDERR_TAIL_LINE_CHARS + 32);
+    pump_stderr(
+      &shared,
+      &mut BufReader::new(format!("FATAL: {long}\n").as_bytes()),
+      false,
+    );
+    let lines = shared.0.lock().unwrap().lines.iter().cloned().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].chars().count(), STDERR_TAIL_LINE_CHARS + 1);
+    assert!(lines[0].starts_with("FATAL: "));
+    assert!(lines[0].ends_with('…'));
+    let tail = StderrTail { state: shared, reader: None };
+    let error = attach_stderr_tail(
+      Error::InvalidInput("Electron exited before authenticating (exit code: 1)".into()),
+      Some(&tail),
+    );
+    let message = error.to_string();
+    assert!(message.contains("Electron exited before authenticating"));
+    assert!(message.contains("ELECTRON_STDERR_TAIL: last 1 Electron stderr line(s):"));
+    assert!(message.contains("FATAL: "));
+  }
+
+  #[test]
+  fn stderr_tail_absent_or_empty_leaves_the_original_error() {
+    let shared = stderr_tail_state();
+    pump_stderr(&shared, &mut BufReader::new(&b""[..]), false);
+    let tail = StderrTail { state: shared, reader: None };
+    let error = Error::InvalidInput("Electron exited before authenticating".into());
+    assert_eq!(attach_stderr_tail(error, None).to_string(), "Electron exited before authenticating");
+    let error = Error::InvalidInput("Electron exited before authenticating".into());
+    assert_eq!(attach_stderr_tail(error, Some(&tail)).to_string(), "Electron exited before authenticating");
+    assert!(matches!(
+      attach_stderr_tail(Error::ChannelDisconnected, Some(&tail)),
+      Error::ChannelDisconnected
+    ));
   }
 
   #[test]

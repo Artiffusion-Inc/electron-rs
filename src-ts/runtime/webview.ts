@@ -124,7 +124,10 @@ export class Webview extends EventEmitter<WebviewEvents> {
     if (options.navigate !== false && this.config.url) this.navigate(this.config.url)
     return Promise.resolve()
   }
-  private syncOwnerState(): void { this.owner.syncContents(this.contents) }
+  private syncOwnerState(): void {
+    if (this.main) this.owner.setScaleContents(this.contents)
+    this.owner.syncContents(this.contents)
+  }
   detach(): void {
     if (!this.attached || this.adopted) return
     this.owner.native.removeListener('resize', this.onResize)

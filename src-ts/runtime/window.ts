@@ -54,6 +54,7 @@ type NativeWindow = BaseWindow & {
   setBackgroundMaterial?(material: 'none' | 'acrylic' | 'mica' | 'tabbed'): void
 }
 type FullscreenRestore = { bounds: Rectangle; maximized: boolean }
+const DEVICE_PIXEL_RATIO_PROBE = 'window.devicePixelRatio'
 
 export function menuTemplate(items: WindowMenuItem[], command: (id: number) => void): MenuItemConstructorOptions[] {
   return items.map(item => {
@@ -84,7 +85,13 @@ export class Window extends EventEmitter<WindowEvents> {
   private appliedConstraints?: string
   private allowClose = false
   private unsubscribeTheme?: () => void
-  private readonly onMetricsChanged = () => this.applyConstraints()
+  private mainScaleContents?: WebContents
+  private scaleCache?: number
+  private scaleProbing = false
+  private scaleDirty = false
+  private readonly scaleContents = new Set<WebContents>()
+  private readonly onScaleChanged = () => this.refreshScale()
+  private readonly onMetricsChanged = () => { this.refreshScale(); this.applyConstraints() }
 
   constructor(private readonly env: WindowEnvironment, readonly native: NativeWindow, readonly id: number,
     private config: WindowConfig, private constraints: SizeConstraints) {
@@ -131,6 +138,13 @@ export class Window extends EventEmitter<WindowEvents> {
     this.installThemeSync()
   }
 
+  setScaleContents(contents: WebContents): void {
+    if (this.mainScaleContents === contents) return
+    this.mainScaleContents = contents
+    this.scaleCache = undefined
+    this.refreshScale()
+  }
+
   get configuration(): Readonly<WindowConfig> { return this.config }
   get destroyed(): boolean { return this.native.isDestroyed() }
   get themeOverride(): Theme { return this.theme }
@@ -149,12 +163,53 @@ export class Window extends EventEmitter<WindowEvents> {
   dispose(): void {
     this.unsubscribeTheme?.(); this.unsubscribeTheme = undefined
     this.env.screen.removeListener('display-metrics-changed', this.onMetricsChanged)
+    for (const contents of this.scaleContents) {
+      contents.removeListener('did-finish-load', this.onScaleChanged)
+      contents.removeListener('dom-ready', this.onScaleChanged)
+      contents.removeListener('destroyed', this.onScaleChanged)
+    }
+    this.scaleContents.clear()
     const emitter = this.native as unknown as NodeJS.EventEmitter
     for (const event of ['resize', 'move', 'maximize', 'unmaximize', 'restore', 'enter-full-screen', 'leave-full-screen'])
       emitter.removeListener(event, this.onMetricsChanged)
   }
 
-  get scale(): number { return this.env.screen.getDisplayMatching(this.native.getBounds()).scaleFactor || 1 }
+  get scale(): number { return this.scaleCache ?? this.displayScale() }
+  private displayScale(): number { return this.env.screen.getDisplayMatching(this.native.getBounds()).scaleFactor || 1 }
+  private refreshScale(): void { void this.probeScale().catch(() => {}) }
+  private async probeScale(): Promise<void> {
+    if (this.scaleProbing) { this.scaleDirty = true; return }
+    const main = this.mainScaleContents
+    const contents = main && !main.isDestroyed() && main.getURL() ? main : undefined
+    if (!contents || typeof contents.mainFrame?.executeJavaScript !== 'function') { this.dropScale(); return }
+    this.scaleProbing = true
+    try {
+      const value = await contents.mainFrame.executeJavaScript(DEVICE_PIXEL_RATIO_PROBE)
+      if (this.destroyed) return
+      if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) { this.dropScale(); return }
+      if (value === this.scaleCache) return
+      this.scaleCache = value
+      this.appliedConstraints = undefined
+      this.applyConstraints()
+    } finally {
+      this.scaleProbing = false
+      if (this.scaleDirty) { this.scaleDirty = false; this.refreshScale() }
+    }
+  }
+  private dropScale(): void {
+    if (this.scaleCache === undefined) return
+    this.scaleCache = undefined
+    this.appliedConstraints = undefined
+    this.applyConstraints()
+  }
+  private trackScale(contents: WebContents): void {
+    if (this.scaleContents.has(contents)) return
+    this.scaleContents.add(contents)
+    contents.on('did-finish-load', this.onScaleChanged)
+    contents.on('dom-ready', this.onScaleChanged)
+    contents.once('destroyed', this.onScaleChanged)
+    this.refreshScale()
+  }
   get contentConstraints(): Record<string, number> {
     return Object.fromEntries(Object.entries(this.constraints).map(([key, axis]) => [key, axis ? Math.round(axis.value / (axis.physical ? this.scale : 1)) : 0]))
   }
@@ -346,6 +401,7 @@ export class Window extends EventEmitter<WindowEvents> {
     return { theme: dark ? 'dark' : 'light', dark: dark && !this.env.nativeTheme.shouldUseHighContrastColors }
   }
   syncContents(contents: WebContents): void {
+    this.trackScale(contents)
     void this.env.applyCursor(contents, this.cursor).catch(() => {})
     void this.env.applyTheme(contents, this.theme).catch(() => {})
   }

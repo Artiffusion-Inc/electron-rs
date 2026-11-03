@@ -82,9 +82,13 @@ class Contents extends EventEmitter {
   getLastWebPreferences() { return {} }
   inspectElement(x, y) { this.inspected = { x, y }; this.openDevTools() }
   executeJavaScript(script) {
-    this.script = script
     // Electron waits for did-stop-loading when a webContents has never loaded.
     if (!this.getURL()) return new Promise(() => {})
+    if (script === 'window.devicePixelRatio') {
+      this.dprQueries = (this.dprQueries ?? 0) + 1
+      return Promise.resolve(this.devicePixelRatio ?? 2)
+    }
+    this.script = script
     if (script.includes('matchMedia(')) {
       this.mediaQueries = (this.mediaQueries ?? 0) + 1
       return Promise.resolve(this.pageDark ?? (this.emulatedTheme
@@ -827,6 +831,35 @@ switch (process.argv[2]) {
       nativeDpi: { scaleFactor: nativeDpi.scaleFactor, constraints: nativeDpi.contentConstraints },
       nativeCleared: (await call('window.geometry', { windowId: 40 })).contentConstraints,
       legacyCleared: constraintsOf(host) }
+    break
+  }
+  case 'main-dpi': {
+    // issue #1360: the window scale must come from the main shell renderer, never
+    // from a guest <webview> that happens to load first.
+    const host = await createHost(true)
+    const main = mainContentsOf(host)
+    main.devicePixelRatio = 1.25
+    main.emit('dom-ready')
+    await settle()
+    const fromMain = await call('window.geometry', { windowId: 2 })
+    await call('webview.create', { windowId: 2, webviewId: 21, url: 'tauri://localhost/child' })
+    const child = inspect('state.childWebviews.get(21).view.webContents')
+    child.devicePixelRatio = 3
+    child.emit('dom-ready')
+    await settle()
+    const afterChild = await call('window.geometry', { windowId: 2 })
+    screen.emit('display-metrics-changed', {}, { scaleFactor: 2 }, ['scaleFactor'])
+    await settle()
+    const afterMetrics = await call('window.geometry', { windowId: 2 })
+    main.devicePixelRatio = 1.5
+    main.emit('did-finish-load')
+    await settle()
+    const changed = await call('window.geometry', { windowId: 2 })
+    result = {
+      fromMain: fromMain.scaleFactor, afterChild: afterChild.scaleFactor,
+      afterMetrics: afterMetrics.scaleFactor, changed: changed.scaleFactor,
+      mainQueries: main.dprQueries ?? 0, childQueries: child.dprQueries ?? 0,
+    }
     break
   }
   case 'minimized-constraints': {
