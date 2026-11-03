@@ -1,3 +1,4 @@
+import { shell } from 'electron'
 import type { App, NativeTheme } from 'electron'
 import type { CommandTable, Params } from '../socket/table'
 import { cursorPosition, displayAtPoint, displays } from './display'
@@ -200,5 +201,7 @@ function appCommands(ctx: CommandContext): CommandTable {
       ctx.nativeTheme.themeSource = p.theme === 'dark' ? 'dark' : p.theme === 'light' ? 'light' : 'system'
       return null
     },
+    'shell.openExternal': (p) => shell.openExternal(String(p.url)).then(() => null),
+    'shell.openPath': (p) => shell.openPath(String(p.path)).then(() => null),
   }
 }

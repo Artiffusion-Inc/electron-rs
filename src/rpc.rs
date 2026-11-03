@@ -705,6 +705,11 @@ pub mod app {
     SetActivationPolicy { policy: ActivationPolicy } => (), "app.activationPolicy", deferred = true;
     SetDockVisibility { visible: bool } => (), "app.dockVisibility", deferred = true;
     SetTheme { theme: Theme } => (), "app.theme", deferred = true;
+    /// Hands an absolute URL or path to the operating system the way a user's
+    /// double click does, from the Electron main process: the shell owns the
+    /// activation of whatever application claims the target.
+    OpenExternal { url: String } => (), "shell.openExternal", deferred = true;
+    OpenPath { path: String } => String, "shell.openPath", deferred = true;
   }
 }
 
@@ -757,6 +762,24 @@ mod tests {
     assert_eq!(
       registered,
       commands.difference(&internal).copied().collect()
+    );
+  }
+
+  #[test]
+  fn shell_opens_carry_the_target_as_one_argument() {
+    round_trip(
+      app::OpenExternal {
+        url: "https://example.test/report".into(),
+      },
+      "shell.openExternal",
+      json!({"url": "https://example.test/report"}),
+    );
+    round_trip(
+      app::OpenPath {
+        path: "/tmp/report".into(),
+      },
+      "shell.openPath",
+      json!({"path": "/tmp/report"}),
     );
   }
 
