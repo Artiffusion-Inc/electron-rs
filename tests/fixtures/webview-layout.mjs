@@ -456,6 +456,28 @@ switch (process.argv[2]) {
     result = { steps, physical, errors, manualResize, disabledResize, enabledResize: first.getBounds() }
     break
   }
+  case 'stale-bounds': {
+    await call('window.create', { windowId: 1, width: 1280, height: 800 })
+    const host = inspect('state.windows.get(1)')
+    await call('webview.create', { windowId: 1, webviewId: 10, url: 'tauri://localhost/content', autoResize: false,
+      bounds: { position: { x: 0, y: 44, physical: false }, size: { width: 1280, height: 796, physical: false } } })
+    const child = host.children[0]
+    const initial = child.getBounds()
+    host.resize(1850, 1053)
+    const afterParentResize = child.getBounds()
+    const stale = { position: { x: 0, y: 44, physical: false }, size: { width: 1280, height: 796, physical: false } }
+    await call('webview.setBounds', { webviewId: 10, ...stale })
+    const afterStaleWrite = child.getBounds()
+    await call('webview.setBounds', { webviewId: 10, ...stale })
+    const afterRepeatedStaleWrite = child.getBounds()
+    await call('webview.setBounds', { webviewId: 10,
+      position: { x: 0, y: 44, physical: false }, size: { width: 1850, height: 1009, physical: false } })
+    const afterFreshWrite = child.getBounds()
+    host.resize(1280, 800)
+    const afterShrink = child.getBounds()
+    result = { initial, afterParentResize, afterStaleWrite, afterRepeatedStaleWrite, afterFreshWrite, afterShrink }
+    break
+  }
   case 'dispatch': {
     const host = await createChildren()
     const first = host.children[0]

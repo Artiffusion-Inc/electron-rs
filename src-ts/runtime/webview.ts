@@ -15,6 +15,7 @@ export interface WebviewEvents {
 }
 
 type NativeView = WebContentsView & { getVisible?(): boolean; setVisible?(visible: boolean): void }
+const sameRect = (a: Rectangle, b: Rectangle): boolean => a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
 type NativeContents = WebContents & { navigationHistory?: { canGoBack(): boolean; goBack(): void; canGoForward(): boolean; goForward(): void } }
 
 export class Webview extends EventEmitter<WebviewEvents> {
@@ -163,7 +164,25 @@ export class Webview extends EventEmitter<WebviewEvents> {
     if (this.adopted) return { scaleFactor, bounds: this.physical(contentBounds, scaleFactor), contentBounds: this.physical(contentBounds, scaleFactor), visible: !this.owner.destroyed && !this.contents.isDestroyed() }
     const c = this.view as NativeView; return { scaleFactor, bounds: this.physical(this.view!.getBounds(), scaleFactor), contentBounds: this.physical(contentBounds, scaleFactor), visible: !this.owner.destroyed && this.owner.native.isVisible() && (c.getVisible?.() ?? true) } }
   private physical(rect: Rectangle, scale: number): Rectangle { return { x: Math.round(rect.x * scale), y: Math.round(rect.y * scale), width: Math.round(rect.width * scale), height: Math.round(rect.height * scale) } }
-  private setNativeBounds(bounds: Rectangle): void { if (!Object.values(bounds).every(Number.isFinite) || bounds.width < 0 || bounds.height < 0) throw new Error('invalid child webview bounds'); this.view!.setBounds(bounds); this.reference = { bounds: { ...bounds }, parent: this.owner.native.getContentBounds() } }
+  private setNativeBounds(bounds: Rectangle): void {
+    if (!Object.values(bounds).every(Number.isFinite) || bounds.width < 0 || bounds.height < 0) throw new Error('invalid child webview bounds')
+    const parent = this.owner.native.getContentBounds(), previous = this.reference
+    // 父窗口已换尺寸却把上一轮几何原样写回（Linux X11 最大化时前端仍拿到旧矩形）：
+    // 过期写入若按新父尺寸重建基线，比例被压成 1:1，子视图永远停在旧尺寸。保留旧
+    // 基线并按比例缩放到新父尺寸，重复的过期写入因此幂等（issue #1368）。
+    if (previous !== undefined && sameRect(previous.bounds, bounds) && !sameRect(previous.parent, parent)) {
+      this.scaleTo(parent)
+      return
+    }
+    this.view!.setBounds(bounds)
+    this.reference = { bounds: { ...bounds }, parent }
+  }
+  private scaleTo(parent: Rectangle): void {
+    const r = this.reference!
+    if (r.parent.width <= 0 || r.parent.height <= 0) { this.reference = { bounds: this.view!.getBounds(), parent }; return }
+    const x = Math.round(r.bounds.x * parent.width / r.parent.width), y = Math.round(r.bounds.y * parent.height / r.parent.height)
+    this.view!.setBounds({ x, y, width: Math.round((r.bounds.x + r.bounds.width) * parent.width / r.parent.width) - x, height: Math.round((r.bounds.y + r.bounds.height) * parent.height / r.parent.height) - y })
+  }
   private toDip(value: number, physical?: boolean): number { return Math.round(value / (physical ? this.owner.scale : 1)) }
   setBounds(input: WebviewBoundsInput): void {
     if (this.adopted) return
@@ -181,10 +200,7 @@ export class Webview extends EventEmitter<WebviewEvents> {
   setAutoResize(autoResize: boolean): void { if (this.adopted) return; this.autoResize = autoResize; this.reference = { bounds: this.view!.getBounds(), parent: this.owner.native.getContentBounds() } }
   resizeWithParent(parent: Rectangle): void {
     if (!this.attached || this.adopted || !this.autoResize || !this.reference || parent.width <= 0 || parent.height <= 0) return
-    const r = this.reference
-    if (r.parent.width <= 0 || r.parent.height <= 0) { this.reference = { bounds: this.view!.getBounds(), parent }; return }
-    const x = Math.round(r.bounds.x * parent.width / r.parent.width), y = Math.round(r.bounds.y * parent.height / r.parent.height)
-    this.view!.setBounds({ x, y, width: Math.round((r.bounds.x + r.bounds.width) * parent.width / r.parent.width) - x, height: Math.round((r.bounds.y + r.bounds.height) * parent.height / r.parent.height) - y })
+    this.scaleTo(parent)
   }
   setVisible(visible: boolean): void { if (this.adopted) return; (this.view as NativeView).setVisible?.(visible) }
   setBackgroundColor(color: string | undefined): void { if (this.adopted) return; this.view!.setBackgroundColor(color ?? '#00000000') }
