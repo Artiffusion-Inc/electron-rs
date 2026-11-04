@@ -109,6 +109,7 @@ class Contents extends EventEmitter {
   reload() { this.reloaded = true }
   focus() { this.focused = true }
   setZoomFactor(value) { this.zoom = value }
+  getZoomFactor() { return this.zoom ?? 1 }
   openDevTools() { this.devtools = true; this.devToolsWebContents = {}; this.emit('devtools-opened') }
   closeDevTools() { this.devtools = false; this.devToolsWebContents = null; this.emit('devtools-closed') }
   isDevToolsOpened() { return this.devtools ?? false }
@@ -860,6 +861,20 @@ switch (process.argv[2]) {
     // from a guest <webview> that happens to load first.
     const host = await createHost(true)
     const main = mainContentsOf(host)
+    for (const zoom of [0.7, 1, 1.5]) {
+      main.setZoomFactor(zoom)
+      main.devicePixelRatio = 2 * zoom
+      main.emit('dom-ready')
+      await settle()
+      const geometry = await call('window.geometry', { windowId: 2 })
+      assert.equal(geometry.scaleFactor, 2, `page zoom ${zoom} must not change screen DPI`)
+      await call('webview.create', { windowId: 2, webviewId: 22, url: 'tauri://localhost/zoom-child',
+        bounds: { position: { x: 0, y: 88, physical: true }, size: { width: 1920, height: 1000, physical: true } } })
+      const view = inspect('state.childWebviews.get(22).view')
+      assert.deepEqual(view.getBounds(), { x: 0, y: 44, width: 960, height: 500 })
+      await call('webview.close', { webviewId: 22 })
+    }
+    main.setZoomFactor(1)
     main.devicePixelRatio = 1.25
     main.emit('dom-ready')
     await settle()

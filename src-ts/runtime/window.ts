@@ -188,8 +188,12 @@ export class Window extends EventEmitter<WindowEvents> {
     if (!contents || typeof contents.mainFrame?.executeJavaScript !== 'function') { this.dropScale(); return }
     this.scaleProbing = true
     try {
-      const value = await contents.mainFrame.executeJavaScript(DEVICE_PIXEL_RATIO_PROBE)
+      const zoom = contents.getZoomFactor()
+      const ratio: unknown = await contents.mainFrame.executeJavaScript(DEVICE_PIXEL_RATIO_PROBE)
       if (this.destroyed) return
+      if (contents.isDestroyed() || contents !== this.mainScaleContents) { this.scaleDirty = true; return }
+      if (zoom !== contents.getZoomFactor()) { this.scaleDirty = true; return }
+      const value = typeof ratio === 'number' ? ratio / zoom : NaN
       if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) { this.dropScale(); return }
       if (value === this.scaleCache) return
       this.scaleCache = value

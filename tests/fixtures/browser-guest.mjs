@@ -48,6 +48,18 @@ async function run() {
       factory.createWindow({ windowId: 1, window: { width: 700, height: 500, visible: false }, webview: { webviewId: 2, url: hostUrl } })
       const shell = webviews.get(2)
       await once(shell.contents, 'did-finish-load')
+      windows.get(1).native.show()
+      const dpi = require('electron').screen.getDisplayMatching(windows.get(1).native.getBounds()).scaleFactor
+      for (const zoom of [0.7, 1, 1.5]) {
+        shell.contents.setZoomFactor(zoom)
+        await shell.contents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+        await windows.get(1).probeScale()
+        assert.ok(Math.abs(windows.get(1).scale - dpi) < 0.001, `page zoom ${zoom} must preserve native DPI`)
+      }
+      shell.contents.setZoomFactor(1)
+      await shell.contents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+      await windows.get(1).probeScale()
+      console.log('native DPI at 70%, 100%, 150% zoom: PASS')
       factory.createWebview({ windowId: 1, webviewId: 3, url: hostUrl + '/harness', guestHost: 2, browserHost: true })
       await shell.contents.executeJavaScript(
         'new Promise((resolve,reject)=>{const w=document.createElement("webview");w.src=' + JSON.stringify(hostUrl + '/harness') + ';w.style="width:600px;height:400px";w.addEventListener("dom-ready",resolve,{once:true});w.addEventListener("did-fail-load",e=>reject(new Error(e.errorDescription)),{once:true});document.body.append(w)})')
