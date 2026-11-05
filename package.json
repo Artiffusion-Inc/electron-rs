@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "tsdown",
-    "typecheck": "tsc -p tsconfig.electron.json",
+    "typecheck": "tsrs -p tsconfig.electron.json --noEmit",
     "test:lifecycle": "node tests/checks/lifecycle.mjs",
     "test:browser": "node tests/fixtures/browser-guest.mjs",
     "test": "pnpm run test:checks && cargo test --locked",
@@ -16,6 +16,7 @@
     "@types/node": "^24.19.2",
     "electron": "44.7.0",
     "tsdown": "^0.23.2",
+    "tsrs": "0.22.0-ts7.1.0-beta",
     "typescript": "5.9.3"
   }
 }
